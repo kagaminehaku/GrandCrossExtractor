@@ -575,6 +575,41 @@ public partial class MainWindow : Window
         return convert ? MediaConverter.Convert(entry.Name, data) : new() { (entry.Name, data) };
     }
 
+    private static readonly HashSet<string> s_reservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
+    /// <summary>
+    /// Reduces a name taken from an archive to a plain file name. Entry names come from the
+    /// archive itself, so a crafted one such as "..\..\x.exe" or "C:\x.bat" must not choose
+    /// where the file is written.
+    /// </summary>
+    private static string SafeFileName(string name)
+    {
+        name = Path.GetFileName(name.Replace('/', '\\'));
+        foreach (char c in Path.GetInvalidFileNameChars())
+            name = name.Replace(c, '_');
+        name = name.Trim().TrimEnd('.', ' ');
+        if (name.Length == 0)
+            name = "unnamed";
+        if (s_reservedNames.Contains(Path.GetFileNameWithoutExtension(name)))
+            name = "_" + name;
+        return name;
+    }
+
+    /// <summary>Full path for an extracted file, guaranteed to lie inside <paramref name="directory"/>.</summary>
+    private static string SafeOutputPath(string directory, string name)
+    {
+        string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string path = Path.GetFullPath(Path.Combine(root, SafeFileName(name)));
+        if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Refusing to write '{name}' outside the destination folder.");
+        return path;
+    }
+
     private void ExtractSingleEntry(Entry entry)
     {
         try
@@ -583,7 +618,7 @@ public partial class MainWindow : Window
             var sfd = new SaveFileDialog
             {
                 Title = files.Count > 1 ? $"Export File ({files.Count} frames are saved in the chosen folder)" : "Export File",
-                FileName = files[0].FileName,
+                FileName = SafeFileName(files[0].FileName),
                 Filter = "All Files (*.*)|*.*"
             };
             if (sfd.ShowDialog(this) != true)
@@ -592,7 +627,7 @@ public partial class MainWindow : Window
             string dir = Path.GetDirectoryName(sfd.FileName)!;
             File.WriteAllBytes(sfd.FileName, files[0].Data);
             foreach (var f in files.Skip(1))
-                File.WriteAllBytes(Path.Combine(dir, f.FileName), f.Data);
+                File.WriteAllBytes(SafeOutputPath(dir, f.FileName), f.Data);
 
             MessageBox.Show(this, files.Count > 1
                     ? $"Saved {files.Count} files to:\n{dir}"
@@ -671,7 +706,7 @@ public partial class MainWindow : Window
                 {
                     foreach (var (fileName, data) in GetOutputFiles(archive, standaloneFrames, entry, convert))
                     {
-                        File.WriteAllBytes(Path.Combine(destinationDir, fileName), data);
+                        File.WriteAllBytes(SafeOutputPath(destinationDir, fileName), data);
                         written++;
                     }
                 }
