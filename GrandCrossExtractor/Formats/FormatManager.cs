@@ -1,5 +1,6 @@
-// FormatManager: loads Formats.Json (exported by GARbro Format View → "Export Grand†CROSS")
-// together with the ShiinaImage/*.bin files it references, and manages schemes and game mapping.
+// FormatManager: loads the per-game encryption schemes from Formats.Json together with the
+// ShiinaImage files they reference (the shared ShiinaImage/Common.bin plus optional per-game
+// ShiinaImage/*.tail), and maps game executables to schemes for auto-detection.
 
 using System.Globalization;
 using System.IO;
@@ -57,8 +58,6 @@ public class FormatManager
         {
             LoadErrors.Add($"Failed to read {SchemeFilePath}: {ex.Message}");
         }
-        foreach (var err in LoadErrors)
-            Console.WriteLine($"[FormatManager] {err}");
     }
 
     private static string? FindSchemeFile()
@@ -101,8 +100,6 @@ public class FormatManager
                     var scheme = ParseScheme(item, baseDir);
                     Schemes[scheme.Name] = scheme;
                     KnownSchemes.Add(scheme);
-                    Console.WriteLine($"[FormatManager] Loaded scheme '{scheme.Name}' (v{scheme.Version}, " +
-                        $"image {scheme.ShiinaImage?.Length ?? 0} bytes, extra {scheme.ExtraCrypt?.GetType().Name ?? "none"})");
                 }
                 catch (Exception ex)
                 {
@@ -226,40 +223,27 @@ public class FormatManager
         string dir = Path.GetDirectoryName(arcPath) ?? "";
         if (string.IsNullOrEmpty(dir)) dir = Directory.GetCurrentDirectory();
 
-        Console.WriteLine($"[FormatManager] Scanning directory for game executables: {dir}");
         // Check if known game exe exists in same directory
         foreach (var kvp in GameMap)
         {
-            string exePath = Path.Combine(dir, kvp.Key);
-            if (File.Exists(exePath))
-            {
-                Console.WriteLine($"[FormatManager] Found EXE: {kvp.Key}. Mapped to: {kvp.Value}");
+            if (File.Exists(Path.Combine(dir, kvp.Key)))
                 return kvp.Value;
-            }
         }
 
         // Check archive file name against game map or scheme names
         string fileName = Path.GetFileNameWithoutExtension(arcPath);
-        Console.WriteLine($"[FormatManager] No EXE found. Falling back to archive filename matching: {fileName}");
         foreach (var kvp in GameMap)
         {
             if (fileName.Contains(Path.GetFileNameWithoutExtension(kvp.Key), StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine($"[FormatManager] Archive name matches EXE name {kvp.Key}. Mapped to: {kvp.Value}");
                 return kvp.Value;
-            }
         }
 
         foreach (var scheme in Schemes.Keys)
         {
             if (fileName.Contains(scheme, StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine($"[FormatManager] Archive name matches Scheme name: {scheme}");
                 return scheme;
-            }
         }
 
-        Console.WriteLine("[FormatManager] Auto-detection failed.");
         return null;
     }
 

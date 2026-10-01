@@ -32,15 +32,16 @@ public class WarcArchive : IDisposable
 
 public class WarcOpener
 {
+    /// <summary>True if the file carries the ShiinaRio "WARC 1.x" signature (any version).</summary>
+    public static bool IsWarc(ArcView file)
+    {
+        return file.MaxOffset >= 16 && file.View.AsciiEqual(4, " 1.");
+    }
+
     public static WarcArchive? TryOpen(ArcView file, EncryptionScheme? selectedScheme = null)
     {
-        Console.WriteLine($"[WarcOpener] TryOpen called for '{file.Name}'");
-        if (file.MaxOffset < 16) return null;
-        if (!file.View.AsciiEqual(4, " 1."))
-        {
-            Console.WriteLine("[WarcOpener] Invalid signature (missing ' 1.')");
+        if (!IsWarc(file))
             return null;
-        }
         int version = file.View.ReadByte(7) - 0x30;
         if (version < 1 || version > 7)
             return null;
@@ -52,53 +53,32 @@ public class WarcOpener
         if (index_offset >= file.MaxOffset)
             return null;
 
-        Console.WriteLine($"[WarcOpener] Archive version: {version}. Index offset: 0x{index_offset:X8}");
-
         EncryptionScheme? scheme = selectedScheme;
         if (scheme == null)
         {
-            Console.WriteLine("[WarcOpener] Auto-detecting scheme...");
             string? detectedTitle = FormatManager.Instance.LookupGame(file.Name);
             if (!string.IsNullOrEmpty(detectedTitle))
-            {
-                Console.WriteLine($"[WarcOpener] Auto-detected title: {detectedTitle}");
                 scheme = FormatManager.Instance.GetScheme(detectedTitle);
-            }
-            
+
             // No silent fallback to a guessed scheme: the index does not depend on the ShiinaImage,
             // so a wrong guess can open fine and then fail on every entry. Let the user pick instead.
         }
-
         if (scheme == null)
-        {
-            Console.WriteLine("[WarcOpener] Error: Could not determine scheme.");
             return null;
-        }
-        
-        Console.WriteLine($"[WarcOpener] Using scheme: {scheme.Name} (Version {scheme.Version})");
 
         var decoder = new Decoder(version, scheme);
         uint max_index_len = decoder.MaxIndexLength;
         uint index_length = (uint)Math.Min(max_index_len, file.MaxOffset - index_offset);
-        Console.WriteLine($"[WarcOpener] Max index length: {max_index_len}. Index length to read: {index_length}");
         if (index_length < 8) return null;
 
         var enc_index = new byte[max_index_len];
         if (index_length != file.View.Read(index_offset, enc_index, 0, index_length))
-        {
-            Console.WriteLine("[WarcOpener] Failed to read index data.");
             return null;
-        }
 
-        Console.WriteLine("[WarcOpener] Decrypting index...");
         decoder.DecryptIndex(index_offset, enc_index);
 
-        Console.WriteLine("[WarcOpener] ZLib decompressing index");
-        if (0x78 != enc_index[8])
-        {
-            Console.WriteLine("[WarcOpener] Invalid ZLib header! Wrong scheme?");
+        if (0x78 != enc_index[8]) // not a zlib stream: wrong scheme
             return null;
-        }
         // Inflate fully up front: ZLibStream.Read may return short counts, which the
         // fixed-size record loop below would mistake for the end of the index.
         var zindex = new MemoryStream(enc_index, 8, (int)index_length - 8);

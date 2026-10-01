@@ -44,8 +44,9 @@ public partial class MainWindow : Window
             return;
         MessageBox.Show(this,
             "Some encryption schemes could not be loaded:\n\n• " + string.Join("\n• ", fm.LoadErrors) +
-            $"\n\nExpected {FormatManager.SchemeFileName} and its ShiinaImage\\*.bin files next to the application. " +
-            "Re-export them with GARbro Format View → \"Export Grand†CROSS\".",
+            $"\n\nThe application needs {FormatManager.SchemeFileName} and the ShiinaImage folder " +
+            "(Common.bin and the per-game .tail files) next to its executable. " +
+            "Restore them from the release package or rebuild the project.",
             "Scheme Data Problem", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
@@ -98,19 +99,15 @@ public partial class MainWindow : Window
             m_currentArchivePath = null;
             m_standaloneFrames = null;
 
-            Console.WriteLine($"[UI] Opening archive: {path}");
             m_lastAttemptedPath = path;
             var arcView = new ArcView(path);
 
             EncryptionScheme? selectedScheme = GetSelectedScheme();
-            Console.WriteLine($"[UI] Selected scheme from UI: {(selectedScheme != null ? selectedScheme.Name : "Auto Detect")}");
 
             // Try open as WAR / WARC
-            Console.WriteLine("[UI] Attempting to open as WAR/WARC archive...");
             var warc = WarcOpener.TryOpen(arcView, selectedScheme);
             if (warc != null)
             {
-                Console.WriteLine($"[UI] Successfully opened as {warc.SchemeName}. Found {warc.Entries.Count} entries.");
                 m_currentArchive = warc;
                 m_allEntries = warc.Entries;
                 m_currentArchivePath = path;
@@ -161,8 +158,14 @@ public partial class MainWindow : Window
                 }
             }
 
+            bool isWarc = WarcOpener.IsWarc(arcView);
             arcView.Dispose();
-            Console.WriteLine("[UI] ERROR: Could not recognize or decrypt this archive.");
+            if (!isWarc)
+            {
+                MessageBox.Show(this, "This file is not a GRAND†CROSS .WAR archive or a valid .S25 image.",
+                    "Unsupported File", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             string hint = selectedScheme == null
                 ? "The game could not be detected automatically (no known game .exe next to the archive and no matching file name).\n" +
                   "Select the game in the Scheme dropdown and the archive will be reopened."
@@ -172,7 +175,6 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[UI] EXCEPTION in OpenArchive: {ex}");
             MessageBox.Show(this, $"Error opening archive:\n{ex.Message}", "Open Failed",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,11 +12,23 @@
     <ApplicationIcon>Resources\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <Product>GrandCross Extractor</Product>
+    <AssemblyTitle>GrandCross Extractor</AssemblyTitle>
+    <Description>Browse, preview and extract resources from Grand Cross (ShiinaRio engine) visual novels.</Description>
+    <Version>1.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>kagaminehaku</Authors>
+    <Copyright>Copyright (c) 2026 kagaminehaku. Portions Copyright (c) 2014-2020 morkt (GARbro).</Copyright>
+    <RepositoryUrl>https://github.com/kagaminehaku/GrandCrossExtractor</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
   <ItemGroup>
     <Resource Include="Resources\icon.ico" />
   </ItemGroup>
 
-  <!-- Scheme data exported by GARbro Format View ("Export Grand†CROSS") -->
+  <!-- Scheme data: Formats.Json plus the shared ShiinaImage/Common.bin and per-game *.tail files -->
   <ItemGroup>
     <None Update="Formats.Json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="ShiinaImage\*.bin" CopyToOutputDirectory="PreserveNewest" />
@@ -24,7 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NVorbis" Version="0.10.*" />
+    <PackageReference Include="NVorbis" Version="0.10.5" />
   </ItemGroup>
 
 </Project>
