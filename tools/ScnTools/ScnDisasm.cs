@@ -73,12 +73,16 @@ static class ScnDisasm
     }
 
     public static readonly HashSet<int> NoFallthrough = new() { 0x258, 0x0000, 0x26C, 0x26D, 0x209 };   // goto, end of script, return, return value
+    // Instructions whose address operands point at code although they do not jump there themselves
+    public static readonly HashSet<int> CodeRefs = new() { 0x000C, 0x0281 };   // register a function (id, address), call with arguments
     // Variable-length instructions; "N2V" = u16 count followed by that many operands
     public static readonly Dictionary<int, string[]> Overrides = new()
     {
         [0x3CF] = new[] { "N2V" },   // local variable declarations
         [0x3CE] = new[] { "N2V" },   // global variable declarations
         [0x283] = new[] { "V", "V", "N2V" },
+        [0x280] = new[] { "N2V" },   // a called function takes its arguments into locals
+        [0x281] = new[] { "V", "V", "N2V" },   // call a function of this script with arguments
         [0x259] = new[] { "SW" },
         [0x2DB] = new[] { "VARGS" },  // message/printf: operands until an FF byte
         [0x209] = new[] { "CASE" }, // u32 index operand address, u32 target, values..., FF, u32 next case
@@ -142,7 +146,7 @@ static class ScnDisasm
                 for (int i = 0; i < count; i++) ops.Add(Operand(b, ref p, out _));
                 continue;
             }
-            if (item == "V") { ops.Add(Operand(b, ref p, out var t)); if (t.HasValue && info.Jump) tg.Add(t.Value); continue; }
+            if (item == "V") { ops.Add(Operand(b, ref p, out var t)); if (t.HasValue && (info.Jump || CodeRefs.Contains(op))) tg.Add(t.Value); continue; }
             int n = int.Parse(item[1..]);
             if (n == 1) ops.Add($"<{b[p]}>");
             else if (n == 2) ops.Add($"<{BitConverter.ToUInt16(b, p)}>");

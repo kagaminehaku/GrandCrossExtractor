@@ -54,30 +54,25 @@ lines, 2,842 messages. Command use in Oreimo Plus, as the story player (`Player/
 
 | Command | Uses | Arguments and meaning |
 |---|---|---|
-| VOICE | 1116 | `file, ?` - voice of the next message |
-| DRAW_EX | 592 | `kind (0/1/2/47), rule S25 or empty, ms, wait` - show the prepared picture: cross-fade, or wipe along the rule mask (dark areas first) |
-| L_BG | 352 | `file, x, y, ?` - background plane 0; **also clears planes 1+** (face overlays like `ev01_01` would otherwise stay) |
-| L_CHR | 372 | `plane, file (empty = clear), x, y, ?[, m, slots...]` |
-| A_CHR | 334 | `code, plane, ...` - plane animation started by the next DRAW, see below |
-| DRAW | 200 | show the prepared picture at once (or with the A_CHR 152 cross-fade) |
-| WAITA | 152 | wait until animations and a non-looping movie end *(a movie with loop 0 is followed by WAITA)* |
+| VOICE | 1116 | `file, loop, slot, wait` - voice of the next message |
+| DRAW_EX | 592 | `kind, rule S25, ms, hide window` - replace the screen and wait: kind 0 cross-fade, 1 cut, 2 rule wipe bright parts first, 47 dark parts first (section 8) |
+| L_BG | 352 | `file, reset, x, y, zoom%` - background plane 0; reset 0 also clears planes 1-9 (face overlays like `ev01_01` would otherwise stay) |
+| L_CHR | 372 | `plane, file (empty = clear), x, y, type[, m, slots...]` - type = plane transition on the next DRAW (0 = 500 ms cross-fade) |
+| A_CHR | 334 | `code, plane, ...` - plane animation, queued until the next DRAW (section 8) |
+| DRAW | 200 | show the prepared picture at once and start the queued animations; does not wait |
+| WAITA | 152 | wait for animations that are not background ones (wf = 0), finite loops and a non-looping movie |
 | WAIT | 120 | `ms` |
 | WINDOW | 118 | `0` = hide the message window (the next message shows it) |
-| EFECT | 67 | `n` (0, 1, 2, 12) - screen effect in `EFCLIB.SCN`; **not decoded**, shown as shakes / a flash |
+| EFECT | 67 | `n, ...` - screen effect, the engine waits: 0 / 1 / 2 shake (16 / 32 / 8 px), 12 zoom pulse (section 8) |
 | L_MONT | 54 | `plane, file, x, y, ?, m/M, ...` - section 2 |
-| EX | 36 | `9,0,dir,width` / `9,1,layer,file` / `9,2,speed` / `9,4` = background scroll setup, picture, start, end (dir 1 = picture moves right, the character walks left; speed unit unknown); `10,2,var,value` = set `_Dvar`; `2,0` = wait for a key; `4` = ? |
+| EX | 36 | `9,0,count,width` / `9,1,slot,file` / `9,2,speed` / `9,4` = background scroll setup, picture, start (px/s, positive moves the picture right), end; `10,2,var,value` = set `_Dvar`; `2,0` = wait for a key; `4` = ? |
 | L_MOVIE / WAIT_L_MOVIE | 36 / 18 | `plane, mv\file.mpg (empty = stop), loop, ?` / `plane` = wait for the end of the current round |
-| MUSIC / MUSIC_FADE | 31 / 32 | `file, ?` (empty = stop) / `[ms]` |
-| SE / SE_FADE | 25 / 7 | `file (empty = stop), plays (0 = loop), channel` / `ms, channel` |
+| MUSIC / MUSIC_FADE | 31 / 32 | `file (empty = stop), loop, fade-in ms` / `[ms]` |
+| SE / SE_FADE | 25 / 7 | `file (empty = stop), mode (0 once, 1 loop, 2 once and wait, 3 load only), channel` / `ms, channel` |
 | PRELOAD | 18 | `file` - cache hint |
 | LABEL / CJUMP / EVENT_BLOCK | 4 | `n` / `_D710==0, label` / `1, label` = skipping inside the block jumps to the label |
 
-`A_CHR` codes *(guesses from the scripts' context unless marked)*: 00 stop and reset the plane;
-01 / 06 looping bounce / sway (`x, y, period`); 40 screen rect the plane is drawn into, 41 source
-rect shown in it (zoom / pan start, `x, y, w, h`), 42 pan / zoom the source rect (`x, y, w, h,
-ms, wait`) - checked against 1600x1200 CGs; 62 fade in through a rule (`rule, ms`); 114 / 128
-move to `x, y` (`ms, wait`); 150 fade out, 151 fade in (`ms, wait`); 152 cross-fade the plane's
-new picture (`ms`, after an expression change); 90 / 91 around expression changes (lip sync?).
+`A_CHR` codes are listed in section 8 (read from START.SCN).
 
 The message window is `SYSTEM.S25` (in `_D`) slot 0 at (70,451). Name plates are slot 29 + n,
 where n comes from `NWINTBL.BIN` (0x24-byte entries: Shift-JIS name, u32 n): 俺 = 30, 桐乃 = 31,
@@ -180,8 +175,8 @@ choice), reading the archives of the game folder:
 | `AudioEngine.cs` | NAudio mixer: BGM, voice, SE channels, loops, fades |
 | `PlayerWindow.*` | text window, name plates, choices, backlog, auto / skip, chapter list |
 
-Approximated: A_CHR codes (above), EFECT, the scroll speed, DRAW_EX kinds. Not done: saves,
-ruby, the engine's own lip sync / blinking, other games' flows (each needs its SRC_MAIN read).
+Command behaviour follows section 8. Approximated: the per-plane rule fade (A_CHR 60-63) uses
+the screen wipe formula, EFECT 3 / 6 flashes. Not done: saves, ruby, the engine's own lip sync / blinking, other games' flows (each needs its SRC_MAIN read).
 
 ## 7. Tools
 
@@ -189,3 +184,42 @@ ruby, the engine's own lip sync / blinking, other games' flows (each needs its S
 dotnet run --project tools/ScnTools -- opscan oreimoplus <OREIMOPLUS_dump_SCY.exe> ops.tsv
 dotnet run --project tools/ScnTools -- dis tools/ScnTools/tables/ops_oreimoplus.tsv out.txt SRC_MAIN.SCN
 ```
+
+## 8. START.SCN / EFCLIB.SCN findings (Oreimo build, used by the player)
+
+Read from START.SCN with ScnTools after fixing 0x280 (`N2V`), 0x281 (`V V N2V`, local call) and
+following `op_000C id, label` (function registration) as code. Command table at 0x3B020
+(name + id); dispatcher `case idx@39C96`. Handlers: L_BG 3D467, L_CHR 3E0A5, DRAW 4192D,
+DRAW_EX 423F5, EFECT 42EC3, SE 454A6, EX 46E58, A_CHR 4766C, WAITA 41B0B, L_MONT 3FA48.
+
+- **Action queue**: A_CHR / L_BG / L_CHR / EX,9 push numbers with `callmod 0,321`; `$DRAW`
+  (function 312) draws, then runs the queue (323, at 637D3) into 384-byte plane records at `b[980]`.
+  Per-frame update = function 220 (L_133CD).
+- **A_CHR last argument (wf)**: 1 = background animation (WAITA does not wait, a click does not
+  end it); 0 = normal (WAITA waits, click finishes it). `$DRAW` itself never waits.
+- **A_CHR 1-6** `cycles (0 = forever), amplitude, period ms (min 30)`; phase = elapsed % period:
+  1 y -= sin(pi*ph/P)*A; 2 y += same; 3/4 triangle ±A/2 on y/x; 5 y -= sin(2pi*ph/P)*A/2;
+  6 x += sin(2pi*ph/P)*A/2. 0 = stop at end of the current cycle, 9 = stop now.
+- **A_CHR 40** target rect, **41** source rect (1/16 px), **42/43/44** pan to rect with easing
+  linear / 1-cos (ease-in) / sin (ease-out).
+- **A_CHR 60-63** rule fade of a plane: 60/62 in, 61/63 out then remove; 62/63 reversed rule.
+- **A_CHR 100-129** = function 306 (L_674FE) type c-100; **150** = type 13 (fade out, then
+  remove plane), **151** = type 19 (fade in, default 1000 ms), **152** = type 0 (plane
+  cross-fade, default 500). Type table at 0x680F0: 1-3,15 slide in from (0,800)/(-800,0)/(800,0)/
+  (0,-800) easing 1; 4-6,16 slide out + remove; 7-9,17 / 10-12,18 same with easing 3; 20-23 /
+  24-27 easing 2; 14 / 28 / 29 = move from the current position, easing 1 / 3 / 2, default 500.
+  Move easing: 1 linear, 2 = end-cos(pi t/2)(end-start), 3 = sin(pi t/2). Fades are linear.
+- **A_CHR 90,plane,ch** replays sound slot ch+11 at every loop cycle (footsteps), 91 stops.
+- **L_BG** `file, reset, x, y, zoom%(100)`; reset 0 clears planes 1-9. **L_CHR** 5th arg =
+  function-306 type (0 = 500 ms plane cross-fade on DRAW).
+- **DRAW_EX** `kind, rule, ms, hidewindow`: always blocking (click ends it). kind 0 cross-fade,
+  1 instant cut, 2 rule wipe, 47 same reversed; 37/48 also rule. 4th arg hides the message window.
+  Rule blend (exe 437B40): weight of new = clamp(t + rule - 256, 0, 256)/256, t 0..511 -> kind 2:
+  **bright rule pixels change first**; kind 47: dark first. Soft edge = full 256 levels.
+- **EFECT n** (function 217, blocking): 0/1/2 = EFCLIB 34 shake with zoom-in a = 16/32/8 px,
+  offsets (0,-a) (-a/2,-a/2) (-a,-a) (-a/2,-a/2), 15 fps, 2 rounds; 12 = EFCLIB 35 zoom pulse
+  crop 16z x 12z, z = 1,2,3,2,1 at 15 fps; 4 white / 5 red 50 ms flash; 3/6 fade flashes.
+- **EX,9** `0,count,width` / `1,slot,file` / `2,speed` / `4`: speed = px per second, sign =
+  direction (positive moves the picture right). **SE** `file, mode (0 once, 1 loop, 2 once and
+  wait, 3 load only), channel` (slot = channel + 11). **MUSIC** `file, loop, fade-in ms`.
+  **VOICE** `file, loop, slot, wait`. **SE_FADE** `ms, channel`.

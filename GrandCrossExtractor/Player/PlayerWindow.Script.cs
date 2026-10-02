@@ -1,8 +1,9 @@
-// Story player: runs the game flow and the scenario commands. Command meanings are in
-// docs/engine-notes.md; those marked "guess" there are approximated here.
+// Story player: runs the game flow and the scenario commands. Command meanings come from
+// START.SCN and EFCLIB.SCN; see docs/engine-notes.md, section 8.
 
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace GrandCrossExtractor.Player;
@@ -11,9 +12,6 @@ public partial class PlayerWindow
 {
     // Script variables (_D710 ...), kept for the whole run
     private readonly Dictionary<int, int> m_vars = new();
-
-    // Cross-fade time asked for by "$A_CHR,152,..." for the next $DRAW
-    private double m_drawFade;
 
     private const int CharacterMs = 28;
 
@@ -138,41 +136,42 @@ public partial class PlayerWindow
             switch (line.Command)
             {
                 case "L_BG":
-                    m_stage.ClearCharacters();
-                    m_stage.SetPlane(0, await LoadImageAsync(line.Arg(0)), line.IntArg(1), line.IntArg(2));
+                    // $L_BG,file,reset,x,y,zoom: reset 0 clears planes 1-9
+                    if (line.IntArg(1) == 0)
+                        m_stage.ClearCharacters();
+                    m_stage.SetPlane(0, await LoadImageAsync(line.Arg(0)), line.IntArg(2), line.IntArg(3));
                     break;
 
                 case "L_CHR":
-                    await LoadPlaneAsync(line.IntArg(0), line, 1);
-                    break;
-
                 case "L_MONT":
-                    await LoadPlaneAsync(line.IntArg(0), line, 1);
+                    await LoadPlaneAsync(line.IntArg(0), line, line.Command == "L_CHR");
                     break;
 
                 case "DRAW_EX":
                 {
+                    // $DRAW_EX,kind,rule,ms,hide window: the engine waits for the transition
+                    var kind = line.IntArg(0) switch
+                    {
+                        1 => Transition.Cut,
+                        2 or 37 or 48 => Transition.RuleBrightFirst,
+                        47 => Transition.RuleDarkFirst,
+                        _ => Transition.CrossFade,
+                    };
                     BitmapSource? rule = null;
-                    if (line.Arg(1).Length > 0 && !Skipping)
+                    if (kind is Transition.RuleBrightFirst or Transition.RuleDarkFirst && !Skipping)
                         rule = (await LoadImageAsync(line.Arg(1)))?.Bitmap;
-                    double ms = Skipping ? 0 : line.IntArg(2);
-                    m_drawFade = 0;
-                    var done = m_stage.Commit(ms, rule);
                     if (line.IntArg(3) != 0)
-                        await WaitSkippableAsync(done);
+                        HideMessageWindow();
+                    await WaitSkippableAsync(m_stage.DrawEx(kind, Skipping ? 0 : line.IntArg(2), rule));
                     break;
                 }
 
                 case "DRAW":
-                {
-                    var done = m_stage.Commit(Skipping ? 0 : m_drawFade);
-                    m_drawFade = 0;
-                    await WaitSkippableAsync(done);
+                    m_stage.Draw();
                     break;
-                }
 
                 case "A_CHR":
-                    AnimateCharacter(line);
+                    await AnimateCharacterAsync(line);
                     break;
 
                 case "WAITA":
@@ -193,14 +192,15 @@ public partial class PlayerWindow
 
                 case "EFECT":
                     if (!Skipping)
-                        ScreenEffect(line.IntArg(0));
+                        await WaitSkippableAsync(ScreenEffect(line.IntArg(0)));
                     break;
 
                 case "MUSIC":
+                    // $MUSIC,file,loop,fade-in ms
                     if (line.Arg(0).Length == 0)
                         m_audio.Stop(AudioEngine.Music);
                     else if (await Task.Run(() => m_data.ReadAudio(line.Arg(0))) is { } music)
-                        m_audio.Play(AudioEngine.Music, music, 0);
+                        m_audio.Play(AudioEngine.Music, music, line.IntArg(1) == 0 ? 1 : 0, line.IntArg(2));
                     break;
 
                 case "MUSIC_FADE":
@@ -208,15 +208,8 @@ public partial class PlayerWindow
                     break;
 
                 case "SE":
-                {
-                    // $SE,file,plays (0 = loop),channel - no file stops the channel
-                    string channel = AudioEngine.Effect(line.IntArg(2));
-                    if (line.Arg(0).Length == 0)
-                        m_audio.Stop(channel);
-                    else if (!(Skipping && line.IntArg(1) != 0) && await Task.Run(() => m_data.ReadAudio(line.Arg(0))) is { } se)
-                        m_audio.Play(channel, se, line.IntArg(1));
+                    await SoundEffectAsync(line);
                     break;
-                }
 
                 case "SE_FADE":
                     m_audio.Stop(AudioEngine.Effect(line.IntArg(1)), line.IntArg(0));
@@ -273,15 +266,16 @@ public partial class PlayerWindow
     }
 
     /// <summary>
-    /// $L_CHR,plane,file,x,y,?[,m,base,layer1,...] and $L_MONT,plane,file,x,y,?,m|M,...:
+    /// $L_CHR,plane,file,x,y,type[,m,base,layer1,...] and $L_MONT,plane,file,x,y,?,m|M,...:
     /// "m" lists the slots (value v at position k = slot k*100+v, -1 = off), "M" gives an
-    /// expression code from MONTBL.BIN (the file may then be left out).
+    /// expression code from MONTBL.BIN (the file may then be left out). The type of $L_CHR is
+    /// the plane transition run by the next $DRAW (0 = cross-fade).
     /// </summary>
-    private async Task LoadPlaneAsync(int plane, ScriptLine line, int first)
+    private async Task LoadPlaneAsync(int plane, ScriptLine line, bool withTransition)
     {
-        string file = line.Arg(first);
-        double x = line.IntArg(first + 1), y = line.IntArg(first + 2);
-        int marker = Array.FindIndex(line.Args, first + 1, a => a is "m" or "M");
+        string file = line.Arg(1);
+        double x = line.IntArg(2), y = line.IntArg(3);
+        int marker = Array.FindIndex(line.Args, 2, a => a is "m" or "M");
         int[]? slots = null;
         bool expression = false;
 
@@ -311,70 +305,184 @@ public partial class PlayerWindow
         }
         var image = await Task.Run(() => m_data.LoadImage(file, slots)).WaitAsync(m_token);
         if (image == null)
+        {
             m_stage.SetPlane(plane, null);
-        else if (expression)
+            return;
+        }
+        if (expression)
+        {
             m_stage.ChangePicture(plane, image, x, y);
-        else
-            m_stage.SetPlane(plane, image, x, y);
+            return;
+        }
+        m_stage.SetPlane(plane, image, x, y);
+        if (withTransition)
+            PlaneTransition(plane, line.IntArg(4), x, y, -1, false);
     }
 
     private async Task<StageImage?> LoadImageAsync(string file) =>
         file.Length == 0 ? null : await Task.Run(() => m_data.LoadImage(file)).WaitAsync(m_token);
 
-    /// <summary>$A_CHR,code,plane,...: plane animations, started by the next $DRAW.</summary>
-    private void AnimateCharacter(ScriptLine line)
+    // Function 306 of START.SCN: plane transition type -> kind (table at 0x680F0)
+    private static readonly int[] s_transitionKinds = { 0, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 2, 3, 3, 4, 5, 6, 1, 7, 7, 7, 7, 8, 8, 8, 8, 5, 7 };
+
+    // Where a slide starts (slide in) or ends (slide out); types 14, 28 and 29 move from the current position
+    private static readonly Dictionary<int, (int X, int Y)> s_slideOffsets = new()
+    {
+        [1] = (0, 800), [2] = (-800, 0), [3] = (800, 0), [15] = (0, -800),
+        [4] = (0, 800), [5] = (800, 0), [6] = (-800, 0), [16] = (0, -800),
+        [7] = (0, 800), [8] = (-800, 0), [9] = (800, 0), [17] = (0, -800),
+        [10] = (0, 800), [11] = (800, 0), [12] = (-800, 0), [18] = (0, -800),
+        [20] = (0, 800), [21] = (0, -800), [22] = (-800, 0), [23] = (800, 0),
+        [24] = (0, -800), [25] = (0, 800), [26] = (-800, 0), [27] = (800, 0),
+    };
+
+    /// <summary>
+    /// Function 306: a plane transition of <paramref name="type"/> (0-29) to (x, y) over
+    /// <paramref name="ms"/> (-1 = the type's default). 0 cross-fade, 19 fade in, 13 fade out and
+    /// remove, others slide in / out or move with easing 1 (linear), 3 (slow end) or 2 (slow start).
+    /// </summary>
+    private void PlaneTransition(int plane, int type, double x, double y, int ms, bool background)
+    {
+        if (type < 0 || type >= s_transitionKinds.Length)
+            type = 0;
+        int kind = s_transitionKinds[type];
+        bool fromCurrent = type is 14 or 28 or 29;
+        double Time(int fallback) => ms >= 0 ? ms : fallback;
+        int easing = kind switch { 3 or 4 => 1, 5 or 6 => 3, _ => 2 };
+        s_slideOffsets.TryGetValue(type, out var offset);
+
+        switch (kind)
+        {
+            case 0:
+                m_stage.QueueCrossFade(plane, Time(500), background);
+                break;
+            case 1:
+                m_stage.QueueFadeIn(plane, Time(1000), background);
+                break;
+            case 2:
+                m_stage.QueueFadeOut(plane, Time(1000), background);
+                break;
+            case 3 or 5 or 7:   // slide in, or move from the current position
+                m_stage.QueueMove(plane, fromCurrent ? null : offset.X, fromCurrent ? null : offset.Y, x, y, easing,
+                                  Time(fromCurrent ? 500 : 1000), background, removeAtEnd: false);
+                break;
+            case 4 or 6 or 8:   // slide out, then remove the plane
+                m_stage.QueueMove(plane, x, y, offset.X, offset.Y, easing, Time(1000), background, removeAtEnd: true);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// $A_CHR,code,plane,...: plane animations, started by the next $DRAW. The last argument
+    /// (wf) of most codes makes a background animation that $WAITA does not wait for.
+    /// </summary>
+    private async Task AnimateCharacterAsync(ScriptLine line)
     {
         int code = line.IntArg(0), plane = line.IntArg(1);
         int P(int i) => line.IntArg(2 + i);
         switch (code)
         {
-            case 0:     // stop the plane's animations
-                m_stage.ResetPlane(plane);
+            case 0:             // stop the loop at the end of its cycle
+            case 9:             // stop the loop now
+                m_stage.QueueStopLoop(plane, code == 9);
                 break;
-            case 1:     // bounce: 0, height, period (guess)
-            case 6:     // sway: x, y, period (guess)
-                m_stage.QueueSway(plane, P(0), P(1), P(2));
+            case >= 1 and <= 6: // loop: cycles (0 = forever), amplitude, period
+                m_stage.QueueLoop(plane, code, P(0), P(1), P(2));
                 break;
-            case 40:    // screen area the plane is drawn into
+            case 40:            // screen area the plane is drawn into
                 m_stage.SetViewTarget(plane, new Rect(P(0), P(1), P(2), P(3)));
                 break;
-            case 41:    // part of the plane shown in that area (zoom / pan start)
+            case 41:            // part of the plane shown in that area
                 m_stage.SetViewSource(plane, new Rect(P(0), P(1), P(2), P(3)));
                 break;
-            case 42:    // pan / zoom to another part: x, y, w, h, ms, wait
-                m_stage.QueueView(plane, new Rect(P(0), P(1), P(2), P(3)), P(4), P(5) != 0);
+            case >= 42 and <= 44:   // pan / zoom: x, y, w, h, ms, wf; easing 1-3
+                m_stage.QueueView(plane, new Rect(P(0), P(1), P(2), P(3)), code - 41, P(4), P(5) != 0);
                 break;
-            case 62:    // fade in through a rule mask: rule, ms (shown as a plain fade)
-                m_stage.QueueFade(plane, true, line.IntArg(3), false);
+            case >= 60 and <= 63:   // through a rule mask: rule, ms; 60/62 appear, 61/63 disappear, 62/63 reversed
+                if (await LoadImageAsync(line.Arg(2)) is { } rule)
+                    m_stage.QueueRuleFade(plane, rule.Bitmap, code % 2 == 0, code >= 62, line.IntArg(3), false);
                 break;
-            case 114:   // move to x, y: ms, wait
-            case 128:
-                m_stage.QueueMove(plane, P(0), P(1), P(2), P(3) != 0);
+            case 90:            // play sound channel n at every cycle of the loop (footsteps)
+            {
+                int channel = P(0);
+                m_stage.QueueCycleAction(plane, () => PlaySoundSlot(channel));
                 break;
-            case 150:   // fade out: ms, wait
-                m_stage.QueueFade(plane, false, P(0), P(1) != 0);
+            }
+            case 91:
+                m_stage.QueueCycleAction(plane, null);
                 break;
-            case 151:   // fade in: ms, wait
-                m_stage.QueueFade(plane, true, P(0), P(1) != 0);
+            case >= 100 and <= 129: // function 306: x, y, ms, wf
+                PlaneTransition(plane, code - 100, P(0), P(1), P(2), P(3) != 0);
                 break;
-            case 152:   // cross-fade the plane's new picture: ms
-                m_drawFade = Math.Max(m_drawFade, P(0));
+            case 150:           // fade out (then remove), fade in, cross-fade: ms, wf
+            case 151:
+            case 152:
+                if (m_stage.TryGetPosition(plane, out double x, out double y))
+                    PlaneTransition(plane, code == 150 ? 13 : code == 151 ? 19 : 0, x, y, P(0), P(1) != 0);
                 break;
-            // 90 / 91: switched on and off around expression changes (lip sync?) - not needed
         }
     }
 
-    /// <summary>$EFECT,n: screen effects from EFCLIB.SCN (not decoded; these are guesses).</summary>
-    private void ScreenEffect(int effect)
+    /// <summary>$EFECT,n (function 217 of START.SCN, effects of EFCLIB.SCN). The engine waits for it.</summary>
+    private Task ScreenEffect(int effect)
     {
+        // EFCLIB 35 zoom pulse sizes: (pixels a side per step x, y, rounds)
+        (int, int, int)[] pulses = { (8, 6, 2), (16, 12, 2), (32, 24, 2), (4, 3, 2), (8, 6, 1), (16, 12, 1), (32, 24, 1), (4, 3, 1) };
+        int[] pulseOf = { 1, 2, 0, 3, 5, 6, 4, 7 };   // $EFECT 8-15
         switch (effect)
         {
-            case 0: m_stage.Shake(0, 6, 300); break;
-            case 1: m_stage.Shake(14, 0, 700); break;
-            case 2: m_stage.Shake(0, 14, 500); break;
-            case 12: m_stage.Flash(400); break;
-            default: m_stage.Shake(6, 6, 400); break;
+            case 0: return m_stage.Shake(16);
+            case 1: return m_stage.Shake(32);
+            case 2: return m_stage.Shake(8);
+            case >= 8 and <= 15:
+            {
+                var (w, h, rounds) = pulses[pulseOf[effect - 8]];
+                return m_stage.ZoomPulse(w, h, rounds);
+            }
+            case 3: return m_stage.Flash(Colors.White, 300, fade: true);
+            case 4: return m_stage.Flash(Colors.White, 50, fade: false);
+            case 5: return m_stage.Flash(Colors.Red, 50, fade: false);
+            case 6: return m_stage.Flash(Colors.White, 1000, fade: true);
+            default: return Task.CompletedTask;
         }
+    }
+
+    // Sounds loaded into the effect channels ($SE), replayed by A_CHR 90
+    private readonly Dictionary<int, byte[]> m_soundSlots = new();
+
+    /// <summary>
+    /// $SE,file,mode,channel: mode 0 plays once, 1 loops, 2 plays once and waits, 3 only loads
+    /// the sound (for A_CHR 90). No file stops the channel.
+    /// </summary>
+    private async Task SoundEffectAsync(ScriptLine line)
+    {
+        int mode = line.IntArg(1), channel = line.IntArg(2);
+        string name = AudioEngine.Effect(channel);
+        if (line.Arg(0).Length == 0)
+        {
+            m_audio.Stop(name);
+            return;
+        }
+        if (await Task.Run(() => m_data.ReadAudio(line.Arg(0))) is not { } sound)
+            return;
+        m_soundSlots[channel] = sound;
+        if (mode == 3 || (Skipping && mode != 1))
+            return;
+        m_audio.Play(name, sound, mode == 1 ? 0 : 1);
+        if (mode == 2)
+            await WaitSkippableAsync(WhenSoundEnds(name));
+    }
+
+    private void PlaySoundSlot(int channel)
+    {
+        if (!Skipping && m_soundSlots.TryGetValue(channel, out var sound))
+            m_audio.Play(AudioEngine.Effect(channel), sound, 1);
+    }
+
+    private async Task WhenSoundEnds(string channel)
+    {
+        while (m_audio.IsPlaying(channel))
+            await Task.Delay(50, m_token);
     }
 
     /// <summary>$EX,group,...: background scroll (9), variables (10) and key waits (2).</summary>
@@ -385,12 +493,13 @@ public partial class PlayerWindow
             case 9:
                 switch (line.IntArg(1))
                 {
-                    case 0: m_stage.ScrollInit(line.IntArg(2), line.IntArg(3)); break;
-                    case 1:
+                    case 0: m_stage.ScrollInit(line.IntArg(3)); break;             // count, width
+                    case 1:                                                          // slot, file
                         if (await LoadImageAsync(line.Arg(3)) is { } picture)
                             m_stage.ScrollImage(picture);
                         break;
-                    case 2: m_stage.ScrollStart(line.IntArg(2)); break;
+                    case 2: m_stage.ScrollStart(line.IntArg(2, 10)); break;          // pixels per second
+                    case 3: m_stage.ScrollStart(0); break;
                     case 4: m_stage.ScrollStop(); break;
                 }
                 break;

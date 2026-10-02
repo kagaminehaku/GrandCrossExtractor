@@ -50,7 +50,7 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   - Open any archive of the game and click **▶ Play Story** to read the story with its pictures, voices, music, movies and choices, straight from the game folder.
   - Start from the beginning or from any chapter in the list. The route menu and the choices work as in the game.
   - Keys: click / Enter = next, right click = hide the text, mouse wheel up = backlog, hold Ctrl = skip, A = auto, Esc = menu, F11 = full screen.
-  - Some character animations and screen effects are approximations of the engine's, and there is no saving.
+  - Animations, transitions and screen effects follow the engine's own scripts (START.SCN, EFCLIB.SCN). There is no saving.
 
 ## Requirements
 
