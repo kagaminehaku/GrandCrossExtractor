@@ -247,6 +247,9 @@
                     <Button x:Name="BtnExtractAll" Content="📦 Extract All" Style="{StaticResource ModernBtn}" Margin="4,0" Click="BtnExtractAll_Click" IsEnabled="False"/>
                     <CheckBox x:Name="ChkConvert" Content="Convert on extract" IsChecked="True" Foreground="#C0C0D0" VerticalAlignment="Center" Margin="10,0,0,0"
                               ToolTip="S25/MI4 → PNG (one file per frame), OGV → OGG, PAD → WAV. Uncheck to save the raw decrypted files."/>
+                    <CheckBox x:Name="ChkCompose" Content="Compose layers" IsChecked="False" Foreground="#C0C0D0" VerticalAlignment="Center" Margin="10,0,0,0"
+                              IsEnabled="{Binding IsChecked, ElementName=ChkConvert}"
+                              ToolTip="Layered S25 images (event CGs, character sprites) are saved as the complete pictures the game shows, with the eyes, mouth and effects the scenario scripts choose, instead of separate frames. Needs the game's script archive (*_T.WAR) in the same folder."/>
                 </StackPanel>
 
                 <!-- Game Scheme Selector -->

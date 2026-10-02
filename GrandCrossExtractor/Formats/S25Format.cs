@@ -11,12 +11,20 @@ namespace GrandCrossExtractor.Formats;
 public class S25Frame
 {
     public int Index { get; set; }
+    /// <summary>Position in the file's slot table. The engine groups layers by it (see <see cref="S25Layout"/>).</summary>
+    public int Slot { get; set; }
     public uint Width { get; set; }
     public uint Height { get; set; }
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
     public BitmapSource Image { get; set; } = null!;
+    /// <summary>Decoded BGRA pixels (straight alpha), Width * Height * 4 bytes.</summary>
+    public byte[] Pixels { get; set; } = null!;
 }
+
+/// <summary>Frame header without pixel data: enough to work out the layer layout cheaply.</summary>
+/// <param name="Index">Frame number used in output names: counts every non-empty slot, including frames that turn out to be invalid.</param>
+public readonly record struct S25FrameInfo(int Index, int Slot, uint Offset, uint Width, uint Height, int OffsetX, int OffsetY);
 
 public class S25Decoder
 {
@@ -25,57 +33,66 @@ public class S25Decoder
         return data.Length >= 8 && data[0] == 'S' && data[1] == '2' && data[2] == '5' && data[3] == 0;
     }
 
+    /// <summary>Reads the slot table and frame headers. Empty slots and invalid frames are skipped.</summary>
+    public static List<S25FrameInfo> ReadFrameInfos(byte[] data)
+    {
+        var infos = new List<S25FrameInfo>();
+        if (!IsS25(data)) return infos;
+
+        int count = LittleEndian.ToInt32(data, 4);
+        if (count <= 0 || count > 0xfffff || 8 + (long)count * 4 > data.Length) return infos;
+
+        int index = 0;
+        for (int slot = 0; slot < count; ++slot)
+        {
+            uint off = LittleEndian.ToUInt32(data, 8 + slot * 4);
+            if (off == 0 || off >= data.Length)
+                continue;
+            int frameIndex = index++;
+            if (off + 0x14L > data.Length)
+                continue;
+            uint width = LittleEndian.ToUInt32(data, (int)off);
+            uint height = LittleEndian.ToUInt32(data, (int)off + 4);
+            if (width == 0 || height == 0 || width > 16384 || height > 16384)
+                continue;
+            infos.Add(new S25FrameInfo(frameIndex, slot, off, width, height,
+                LittleEndian.ToInt32(data, (int)off + 8), LittleEndian.ToInt32(data, (int)off + 12)));
+        }
+        return infos;
+    }
+
     public static List<S25Frame> DecodeAllFrames(byte[] data)
     {
         var frames = new List<S25Frame>();
-        if (!IsS25(data)) return frames;
-
         using var stream = new BinMemoryStream(data);
-        stream.Position = 4;
-        int count = stream.ReadInt32();
-        if (count <= 0 || count > 0xfffff) return frames;
 
-        var offsets = new List<uint>();
-        for (int i = 0; i < count; ++i)
+        foreach (var info in ReadFrameInfos(data))
         {
-            uint off = stream.ReadUInt32();
-            if (off > 0 && off < data.Length)
-                offsets.Add(off);
-        }
-
-        for (int i = 0; i < offsets.Count; ++i)
-        {
-            uint off = offsets[i];
-            stream.Position = off;
-            uint width = stream.ReadUInt32();
-            uint height = stream.ReadUInt32();
-            int offsetX = stream.ReadInt32();
-            int offsetY = stream.ReadInt32();
+            stream.Position = info.Offset + 0x10;
             bool incremental = (stream.ReadUInt32() & 0x80000000u) != 0;
 
-            if (width == 0 || height == 0 || width > 16384 || height > 16384)
-                continue;
-
-            var reader = new S25Reader(stream, width, height, off + 0x14, incremental);
+            var reader = new S25Reader(stream, info.Width, info.Height, info.Offset + 0x14, incremental);
             byte[] pixels = reader.Unpack();
 
             var bitmap = BitmapSource.Create(
-                (int)width, (int)height,
+                (int)info.Width, (int)info.Height,
                 96, 96,
                 PixelFormats.Bgra32,
                 null,
                 pixels,
-                (int)width * 4);
+                (int)info.Width * 4);
             bitmap.Freeze();
 
             frames.Add(new S25Frame
             {
-                Index = i,
-                Width = width,
-                Height = height,
-                OffsetX = offsetX,
-                OffsetY = offsetY,
-                Image = bitmap
+                Index = info.Index,
+                Slot = info.Slot,
+                Width = info.Width,
+                Height = info.Height,
+                OffsetX = info.OffsetX,
+                OffsetY = info.OffsetY,
+                Image = bitmap,
+                Pixels = pixels
             });
         }
 

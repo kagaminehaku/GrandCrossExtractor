@@ -554,10 +554,12 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// Produces the file(s) to write for an entry: decrypted data, optionally converted
-    /// (S25 → PNG per frame, OGV → OGG, ...). Safe to call from a worker thread.
+    /// (S25 → PNG per frame, OGV → OGG, ...), with layered S25 images composed as the
+    /// <paramref name="scripts"/> show them. Files are produced lazily: write each one before
+    /// taking the next. Safe to call from a worker thread.
     /// </summary>
-    private static List<(string FileName, byte[] Data)> GetOutputFiles(
-        WarcArchive? archive, List<S25Frame>? standaloneFrames, Entry entry, bool convert)
+    private static IEnumerable<(string FileName, byte[] Data)> GetOutputFiles(
+        WarcArchive? archive, List<S25Frame>? standaloneFrames, Entry entry, bool convert, S25ScriptIndex? scripts)
     {
         if (standaloneFrames != null)
         {
@@ -566,13 +568,39 @@ public partial class MainWindow : Window
             encoder.Frames.Add(BitmapFrame.Create(frame.Image));
             using var ms = new MemoryStream();
             encoder.Save(ms);
-            return new() { (entry.Name, ms.ToArray()) };
+            return new[] { (entry.Name, ms.ToArray()) };
         }
         if (archive == null)
             throw new InvalidOperationException("No archive is open.");
 
         byte[] data = WarcOpener.OpenEntry(archive, entry);
-        return convert ? MediaConverter.Convert(entry.Name, data) : new() { (entry.Name, data) };
+        return convert ? MediaConverter.Convert(entry.Name, data, scripts) : new[] { (entry.Name, data) };
+    }
+
+    // Scenario scripts of the open archive's game folder, read once per folder and scheme
+    private S25ScriptIndex? m_scriptIndex;
+    private string? m_scriptIndexKey;
+
+    /// <summary>
+    /// The layer combinations the game's scenario scripts show, read from the archives next to
+    /// the open one (normally *_T.WAR). Null when no scripts are found there.
+    /// </summary>
+    private async Task<S25ScriptIndex?> GetScriptIndexAsync()
+    {
+        if (m_currentArchive == null || m_currentArchivePath == null)
+            return null;
+        var scheme = GetSelectedScheme() ?? FormatManager.Instance.GetScheme(m_currentArchive.SchemeName);
+        string path = m_currentArchivePath;
+        string key = $"{Path.GetDirectoryName(Path.GetFullPath(path))}|{scheme?.Name}";
+        if (m_scriptIndexKey != key)
+        {
+            string previous = TxtStatusArchive.Text;
+            TxtStatusArchive.Text = "Reading the scenario scripts...";
+            m_scriptIndex = await Task.Run(() => S25ScriptIndex.FromGameFolder(path, scheme));
+            m_scriptIndexKey = key;
+            TxtStatusArchive.Text = previous;
+        }
+        return m_scriptIndex is { IsEmpty: false } ? m_scriptIndex : null;
     }
 
     private static readonly HashSet<string> s_reservedNames = new(StringComparer.OrdinalIgnoreCase)
@@ -610,27 +638,50 @@ public partial class MainWindow : Window
         return path;
     }
 
-    private void ExtractSingleEntry(Entry entry)
+    private async void ExtractSingleEntry(Entry entry)
     {
         try
         {
-            var files = GetOutputFiles(m_currentArchive, m_standaloneFrames, entry, ChkConvert.IsChecked == true);
+            bool convert = ChkConvert.IsChecked == true;
+            S25ScriptIndex? scripts = null;
+
+            if (convert && ChkCompose.IsChecked == true && m_currentArchive != null && m_standaloneFrames == null &&
+                m_currentRawData != null && S25Layout.Analyze(m_currentRawData) is { } layout)
+            {
+                scripts = await GetScriptIndexAsync();
+                // Several composed pictures: extract them like a selection, with progress
+                if (scripts != null && scripts.GetCombinations(entry.Name, layout).Count > 1)
+                {
+                    var ofd = new OpenFolderDialog { Title = $"Select Destination Folder for the Composed Pictures of {entry.Name}" };
+                    if (ofd.ShowDialog(this) == true)
+                        await ExtractEntriesAsync(new List<Entry> { entry }, ofd.FolderName);
+                    return;
+                }
+            }
+
+            using var files = GetOutputFiles(m_currentArchive, m_standaloneFrames, entry, convert, scripts).GetEnumerator();
+            if (!files.MoveNext())
+                return;
+            var first = files.Current;
+            bool more = files.MoveNext();
+
             var sfd = new SaveFileDialog
             {
-                Title = files.Count > 1 ? $"Export File ({files.Count} frames are saved in the chosen folder)" : "Export File",
-                FileName = SafeFileName(files[0].FileName),
+                Title = more ? "Export File (all frames are saved in the chosen folder)" : "Export File",
+                FileName = SafeFileName(first.FileName),
                 Filter = "All Files (*.*)|*.*"
             };
             if (sfd.ShowDialog(this) != true)
                 return;
 
             string dir = Path.GetDirectoryName(sfd.FileName)!;
-            File.WriteAllBytes(sfd.FileName, files[0].Data);
-            foreach (var f in files.Skip(1))
-                File.WriteAllBytes(SafeOutputPath(dir, f.FileName), f.Data);
+            File.WriteAllBytes(sfd.FileName, first.Data);
+            int count = 1;
+            for (; more; more = files.MoveNext(), count++)
+                File.WriteAllBytes(SafeOutputPath(dir, files.Current.FileName), files.Current.Data);
 
-            MessageBox.Show(this, files.Count > 1
-                    ? $"Saved {files.Count} files to:\n{dir}"
+            MessageBox.Show(this, count > 1
+                    ? $"Saved {count} files to:\n{dir}"
                     : $"Saved successfully to:\n{sfd.FileName}",
                 "Export Completed", MessageBoxButton.OK, MessageBoxImage.Information);
         }
@@ -678,10 +729,6 @@ public partial class MainWindow : Window
     {
         if (m_currentArchive == null && m_standaloneFrames == null) return;
 
-        ProgExtraction.Visibility = Visibility.Visible;
-        ProgExtraction.Value = 0;
-        ProgExtraction.Maximum = entries.Count;
-
         // Changing the scheme or opening another file would dispose the archive mid-extraction
         m_extracting = true;
         BtnOpen.IsEnabled = false;
@@ -695,6 +742,23 @@ public partial class MainWindow : Window
         int written = 0;
         var failures = new List<string>();
 
+        S25ScriptIndex? scripts = null;
+        if (convert && ChkCompose.IsChecked == true && archive != null &&
+            entries.Any(e => e.Name.EndsWith(".S25", StringComparison.OrdinalIgnoreCase)))
+        {
+            scripts = await GetScriptIndexAsync();
+            if (scripts == null)
+                MessageBox.Show(this,
+                    "No scenario scripts were found next to this archive (normally the game's *_T.WAR), " +
+                    "so it is not known which layer combinations the game shows.\n\n" +
+                    "Layered images will be saved as separate frames.",
+                    "Compose Layers", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        ProgExtraction.Visibility = Visibility.Visible;
+        ProgExtraction.Value = 0;
+        ProgExtraction.Maximum = entries.Count;
+
         await Task.Run(() =>
         {
             Directory.CreateDirectory(destinationDir);
@@ -704,10 +768,17 @@ public partial class MainWindow : Window
                 var entry = entries[i];
                 try
                 {
-                    foreach (var (fileName, data) in GetOutputFiles(archive, standaloneFrames, entry, convert))
+                    int perEntry = 0;
+                    foreach (var (fileName, data) in GetOutputFiles(archive, standaloneFrames, entry, convert, scripts))
                     {
                         File.WriteAllBytes(SafeOutputPath(destinationDir, fileName), data);
                         written++;
+                        // Composed sets can take minutes on their own: show that work is going on
+                        if (++perEntry % 25 == 0)
+                        {
+                            string text = $"Extracting: {entry.Name} ({i + 1}/{entries.Count}), {perEntry:N0} pictures...";
+                            Dispatcher.BeginInvoke(() => TxtStatusArchive.Text = text);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -724,13 +795,7 @@ public partial class MainWindow : Window
             }
         });
 
-        m_extracting = false;
-        ProgExtraction.Visibility = Visibility.Collapsed;
-        BtnOpen.IsEnabled = true;
-        BtnExtractSelected.IsEnabled = true;
-        BtnExtractAll.IsEnabled = true;
-        CmbScheme.IsEnabled = true;
-        TxtStatusArchive.Text = $"Archive: {Path.GetFileName(m_currentArchivePath ?? "")}";
+        EndExtraction();
 
         int ok = entries.Count - failures.Count;
         if (failures.Count == 0)
@@ -749,6 +814,17 @@ public partial class MainWindow : Window
                 $"{failures.Count} entries failed. If most entries failed, the wrong game scheme is probably selected.\n\n{list}",
                 "Extraction Finished With Errors", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void EndExtraction()
+    {
+        m_extracting = false;
+        ProgExtraction.Visibility = Visibility.Collapsed;
+        BtnOpen.IsEnabled = true;
+        BtnExtractSelected.IsEnabled = true;
+        BtnExtractAll.IsEnabled = true;
+        CmbScheme.IsEnabled = true;
+        TxtStatusArchive.Text = $"Archive: {Path.GetFileName(m_currentArchivePath ?? "")}";
     }
 
     #endregion
