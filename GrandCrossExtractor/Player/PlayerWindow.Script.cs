@@ -18,10 +18,19 @@ public partial class PlayerWindow
 
     #region Flow
 
-    private async Task RunFlowAsync(string? startFile)
+    // Where the story is, for saves: routes played, scenario file and message number in it
+    private int m_played;
+    private string m_file = "";
+    private int m_messageIndex;
+    private string m_lastText = "";
+
+    // Loading a save: messages before this one are passed silently (-1 = not loading)
+    private int m_restoreTo = -1;
+
+    private async Task RunFlowAsync(string? startFile, int initialPlayed = 0)
     {
         int all = (1 << m_flow.Routes.Count) - 1;
-        int played = 0;
+        int played = m_played = initialPlayed;
         bool started = startFile == null;
 
         foreach (var file in m_flow.Opening)
@@ -37,19 +46,19 @@ public partial class PlayerWindow
             {
                 if (RouteContains(m_flow.Routes[r], startFile!))
                 {
-                    played |= 1 << r;
+                    m_played = played |= 1 << r;
                     started = true;
                     await PlayRouteAsync(m_flow.Routes[r], startFile);
                 }
             }
         }
         if (!started && m_flow.Ending.Any(f => Same(f, startFile)))
-            played = all;
+            m_played = played = all;
 
         while (played != all)
         {
             int route = await ChooseAsync(m_flow.Routes.Select(r => r.Title).ToList(), m_flow.MenuButtonSlot, played);
-            played |= 1 << route;
+            m_played = played |= 1 << route;
             await PlayRouteAsync(m_flow.Routes[route], null);
         }
 
@@ -101,6 +110,8 @@ public partial class PlayerWindow
 
     private async Task PlayScriptAsync(string file)
     {
+        m_file = file;
+        m_messageIndex = 0;
         var script = await Task.Run(() => m_data.LoadScript(file)).WaitAsync(m_token)
             ?? throw new InvalidOperationException($"The scenario file {file} is missing.");
         await ExecuteAsync(script);
@@ -560,6 +571,17 @@ public partial class PlayerWindow
         string? voice = m_pendingVoice;
         m_pendingVoice = null;
         AddLog(line.Speaker ?? "", ScenarioScript.DisplayText(text), voice);
+
+        // Loading a save: pass the messages before the saved one
+        int index = m_messageIndex++;
+        m_lastText = text;
+        if (m_restoreTo >= 0)
+        {
+            if (index < m_restoreTo)
+                return;
+            m_restoreTo = -1;
+            UpdateModeButtons();
+        }
 
         SetSpeaker(line.Speaker);
         ShowMessageWindow();

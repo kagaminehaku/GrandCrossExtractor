@@ -268,3 +268,8 @@ drawing. A small interpreter for this subset could replace the hand-written `Sto
   `d\caution` (0.6 s fade, until a click), `d\white`, then TITLE.S25 slot 0 with `m\oreplus_01`.
   Buttons (function 230) are TITLE.S25 slot groups 10 スタート, 20 ロード, 30 オプション, 80 おわる
   (slot + 1 = larger highlighted picture). After the ending SRC_MAIN loads topmenu.scn again.
+- **Save / load pages**: SYSTEM.S25 2010 SAVE / 2011 LOAD (2 x 5 slots, boxes at 63 + 352·col,
+  62 + 101·row), page tabs 2030 + 10·k (PAGE 1-9, AUTO; +1 highlighted, +2 current), BACK 2170.
+  900 = backlog page, 1000 = OPTION page. The game's slot pictures are fixed THSAVE.S25 thumbnails
+  (frames 0-140, 100x75; mapping not decoded); the player stores a screenshot instead. A player
+  save is {file, message number, routes played}; loading replays the file silently to that message.

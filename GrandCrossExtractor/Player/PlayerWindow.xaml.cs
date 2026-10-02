@@ -27,7 +27,8 @@ public partial class PlayerWindow : Window
     private bool m_auto;
     private bool m_skip;
     private bool m_ctrlHeld;
-    private bool Skipping => m_skip || m_ctrlHeld;
+    // Loading a save passes the messages before the saved one like skipping does
+    private bool Skipping => m_skip || m_ctrlHeld || m_restoreTo >= 0;
 
     // A click (or Enter, Space, ...) the script is waiting for
     private TaskCompletionSource? m_click;
@@ -137,7 +138,7 @@ public partial class PlayerWindow : Window
 
             TitleLayer.Children.Clear();
             AddTitleButton(frames, 10, () => Start(null));       // スタート
-            AddTitleButton(frames, 20, ShowMenu);                // ロード: chapters until saves exist
+            AddTitleButton(frames, 20, () => ShowSavePage(saving: false));   // ロード
             AddTitleButton(frames, 30, null);                    // オプション: not available yet
             AddTitleButton(frames, 80, Close);                   // おわる
             TitleLayer.Visibility = Visibility.Visible;
@@ -221,8 +222,11 @@ public partial class PlayerWindow : Window
             Start(chapter.File);
     }
 
-    /// <summary>Plays the story from a scenario file (null = from the beginning), ending any run in progress.</summary>
-    private async void Start(string? file)
+    /// <summary>
+    /// Plays the story from a scenario file (null = from the beginning), ending any run in
+    /// progress. A loaded save gives the routes played and the message to resume at.
+    /// </summary>
+    private async void Start(string? file, int played = 0, int message = -1)
     {
         m_run?.Cancel();
         m_titleRun?.Cancel();
@@ -231,6 +235,7 @@ public partial class PlayerWindow : Window
         var run = new CancellationTokenSource();
         m_run = run;
         m_token = run.Token;
+        m_restoreTo = message;
         m_skip = m_auto = false;
         UpdateModeButtons();
         HideMenu();
@@ -238,7 +243,7 @@ public partial class PlayerWindow : Window
 
         try
         {
-            await RunFlowAsync(file);
+            await RunFlowAsync(file, played);
             // The game goes back to the title screen after the ending
             if (m_run == run)
                 ShowTitle(false);
@@ -281,7 +286,7 @@ public partial class PlayerWindow : Window
     private void Advance()
     {
         if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible ||
-            TitleLayer.Visibility == Visibility.Visible)
+            TitleLayer.Visibility == Visibility.Visible || SaveLayer.Visibility == Visibility.Visible)
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
@@ -372,7 +377,9 @@ public partial class PlayerWindow : Window
                 ShowLog();
                 break;
             case Key.Escape:
-                if (LogLayer.Visibility == Visibility.Visible)
+                if (SaveLayer.Visibility == Visibility.Visible)
+                    HideSavePage();
+                else                 if (LogLayer.Visibility == Visibility.Visible)
                     LogLayer.Visibility = Visibility.Collapsed;
                 else if (WindowStyle == WindowStyle.None)
                     ToggleFullScreen();

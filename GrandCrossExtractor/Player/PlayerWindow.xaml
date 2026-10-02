@@ -131,6 +131,9 @@
                 <!-- Title screen of TOPMENU.SCN: TITLE.S25 buttons over its background -->
                 <Canvas x:Name="TitleLayer" Visibility="Collapsed" Background="Transparent"/>
 
+                <!-- SAVE / LOAD pages -->
+                <Canvas x:Name="SaveLayer" Visibility="Collapsed" Background="Black"/>
+
                 <!-- Chapter list -->
                 <Grid x:Name="MenuLayer" Background="#F2101016" Visibility="Collapsed">
                     <Grid.RowDefinitions>
@@ -184,6 +187,8 @@
                 <Button Content="☰ Chapters" Style="{StaticResource BarBtn}" Click="BtnMenu_Click" ToolTip="Chapter list (Esc)"/>
                 <Button x:Name="BtnAuto" Content="Auto" Style="{StaticResource BarBtn}" Click="BtnAuto_Click" ToolTip="Advance by itself after each line (A)"/>
                 <Button x:Name="BtnSkip" Content="Skip" Style="{StaticResource BarBtn}" Click="BtnSkip_Click" ToolTip="Fast-forward to the next choice (S, or hold Ctrl)"/>
+                <Button Content="Save" Style="{StaticResource BarBtn}" Click="BtnSave_Click" ToolTip="Save"/>
+                <Button Content="Load" Style="{StaticResource BarBtn}" Click="BtnLoad_Click" ToolTip="Load"/>
                 <Button Content="Log" Style="{StaticResource BarBtn}" Click="BtnLog_Click" ToolTip="Backlog (L or mouse wheel up)"/>
                 <Button Content="Hide" Style="{StaticResource BarBtn}" Click="BtnHide_Click" ToolTip="Hide the message window (H or right click)"/>
                 <Button Content="⛶" Style="{StaticResource BarBtn}" Click="BtnFullScreen_Click" ToolTip="Full screen (F11)"/>
