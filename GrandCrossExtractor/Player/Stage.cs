@@ -172,6 +172,8 @@ public sealed class Stage
         Freeze();
         NoteChange(plane);
         plane.Picture = picture;
+        plane.X = x;
+        plane.Y = y;
         plane.Element.Source = picture.Bitmap;
         plane.Element.Width = picture.Bitmap.PixelWidth;
         plane.Element.Height = picture.Bitmap.PixelHeight;

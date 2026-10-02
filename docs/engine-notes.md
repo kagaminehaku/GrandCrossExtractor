@@ -246,3 +246,21 @@ routes, ejaculation choices, ending). Across all 11 they use few instructions: m
 goto / gosub / lea / switch / case / eval and arithmetic; TXT files run through `gosub 240`
 (357 calls), menus through `callmod 0,203` or `callmod 0,270`; the rest is the staff roll's
 drawing. A small interpreter for this subset could replace the hand-written `StoryFlow`.
+
+### Text, choices, L_MONT (used by the player)
+
+- **Message text** (style bank 0, START 22393): font `b[150]` = ＭＳ ゴシック, `_H24_X11_XZ23_Y29`
+  (24 px glyphs, advance 11 half width / 23 full width, 29 px lines), white, text area from
+  (126,456), 575 wide, right margin `_l` 701. Edge by `b[159]`: 0 none (default), 1 black shadow
+  at (1,1), 2 outline. Speed `_w` = `b[3]` (default 2) x 18 = 36 ms per character. Kinsoku table
+  `_P` at 222C4: no line start `。，、．：；゛゜ヽヾゝゞ々）〕］｝〉》」』】°′″℃￠％‰”―　・` and small kana,
+  no line end `（〔［｛〈《「『【￥＄￡`. Gaiji `①...` = frames of `GAIJI.S25`; click wait icon =
+  `SYSTEM2.S25` slot 20.
+- **Choices** (function 203, 062A4): picture buttons in a fixed 2 x 4 grid, 391 x 86 px apart,
+  plus the frame offset; played options stay visible with slot + 3 at alpha 160 and cannot be
+  chosen. Text choices: slot 311 / 312 rows 100 px apart, first at
+  y = 250 - (96 + (n - 1) * 100) / 2 - 48; text ＭＳ ゴシック 31 px (`_H31_X15_XZ30`), black
+  shadow (1,1), centred between x 240 and 560 at row y + 32.
+- **L_MONT** (function 304) queues like L_CHR (10001): its 5th argument is the plane
+  transition of function 306, so an expression change cross-fades 500 ms on `$DRAW` unless
+  A_CHR 152 gives another time.

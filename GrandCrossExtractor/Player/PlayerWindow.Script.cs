@@ -13,7 +13,8 @@ public partial class PlayerWindow
     // Script variables (_D710 ...), kept for the whole run
     private readonly Dictionary<int, int> m_vars = new();
 
-    private const int CharacterMs = 28;
+    // Text speed of the default configuration: "_w" = b[3] (2) * 18 ms per character
+    private const int CharacterMs = 36;
 
     #region Flow
 
@@ -144,7 +145,7 @@ public partial class PlayerWindow
 
                 case "L_CHR":
                 case "L_MONT":
-                    await LoadPlaneAsync(line.IntArg(0), line, line.Command == "L_CHR");
+                    await LoadPlaneAsync(line.IntArg(0), line);
                     break;
 
                 case "DRAW_EX":
@@ -268,10 +269,9 @@ public partial class PlayerWindow
     /// <summary>
     /// $L_CHR,plane,file,x,y,type[,m,base,layer1,...] and $L_MONT,plane,file,x,y,?,m|M,...:
     /// "m" lists the slots (value v at position k = slot k*100+v, -1 = off), "M" gives an
-    /// expression code from MONTBL.BIN (the file may then be left out). The type of $L_CHR is
-    /// the plane transition run by the next $DRAW (0 = cross-fade).
+    /// expression code from MONTBL.BIN (the file may then be left out).
     /// </summary>
-    private async Task LoadPlaneAsync(int plane, ScriptLine line, bool withTransition)
+    private async Task LoadPlaneAsync(int plane, ScriptLine line)
     {
         string file = line.Arg(1);
         double x = line.IntArg(2), y = line.IntArg(3);
@@ -309,14 +309,13 @@ public partial class PlayerWindow
             m_stage.SetPlane(plane, null);
             return;
         }
+        // Both go through the action queue (function 304 / 10001): the 5th argument is the plane
+        // transition the next $DRAW runs, 0 = a 500 ms cross-fade
         if (expression)
-        {
             m_stage.ChangePicture(plane, image, x, y);
-            return;
-        }
-        m_stage.SetPlane(plane, image, x, y);
-        if (withTransition)
-            PlaneTransition(plane, line.IntArg(4), x, y, -1, false);
+        else
+            m_stage.SetPlane(plane, image, x, y);
+        PlaneTransition(plane, line.IntArg(4), x, y, -1, false);
     }
 
     private async Task<StageImage?> LoadImageAsync(string file) =>
@@ -557,10 +556,10 @@ public partial class PlayerWindow
 
     private async Task ShowMessageAsync(ScriptLine line)
     {
-        string text = ScenarioScript.DisplayText(line.Text!);
+        string text = line.Text!;
         string? voice = m_pendingVoice;
         m_pendingVoice = null;
-        AddLog(line.Speaker ?? "", text, voice);
+        AddLog(line.Speaker ?? "", ScenarioScript.DisplayText(text), voice);
 
         SetSpeaker(line.Speaker);
         ShowMessageWindow();

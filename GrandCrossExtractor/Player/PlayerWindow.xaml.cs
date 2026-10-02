@@ -74,6 +74,16 @@ public partial class PlayerWindow : Window
         {
             WindowFallback.Visibility = Visibility.Visible;
         }
+
+        // Gaiji (①...) are frames of GAIJI.S25 in order; the click wait icon is SYSTEM2.S25 slot 20
+        var gaiji = data.LoadFrames("GAIJI.S25")?.OrderBy(f => f.Slot).ToList();
+        TxtMessage.Gaiji = c => gaiji != null && c - '①' is int i && i >= 0 && i < gaiji.Count ? gaiji[i] : null;
+        if (data.LoadFrames("SYSTEM2.S25")?.FirstOrDefault(f => f.Slot == 20) is { } wait)
+        {
+            TxtNext.Source = wait.Image;
+            Canvas.SetLeft(TxtNext, wait.OffsetX);
+            Canvas.SetTop(TxtNext, wait.OffsetY);
+        }
         UpdateModeButtons();
     }
 
@@ -424,25 +434,21 @@ public partial class PlayerWindow : Window
     }
 
     /// <summary>Shows the first <paramref name="shown"/> characters; the rest keeps its place, invisible.</summary>
-    private void SetMessageText(string text, int shown)
-    {
-        TxtMessage.Inlines.Clear();
-        shown = Math.Clamp(shown, 0, text.Length);
-        TxtMessage.Inlines.Add(new Run(text[..shown]));
-        if (shown < text.Length)
-            TxtMessage.Inlines.Add(new Run(text[shown..]) { Foreground = Brushes.Transparent });
-    }
+    private void SetMessageText(string text, int shown) => TxtMessage.SetText(text, shown);
 
     #endregion
 
     #region Choices
 
     /// <summary>
-    /// Shows a choice and waits for the answer. With <paramref name="imageSlot"/> the options are
-    /// the game's own buttons (SYSTEM.S25 slot + 10 per option, +1 when highlighted); options
-    /// whose bit is set in <paramref name="hidden"/> are left out. Returns the option's index.
+    /// Shows a choice and waits for the answer, laid out as function 203 of START.SCN does.
+    /// With <paramref name="imageSlot"/> the options are the game's picture buttons (SYSTEM.S25
+    /// slot + 10 per option; +1 highlighted, +3 already played) in a fixed grid of two columns
+    /// of four, 391 x 86 px apart; options whose bit is set in <paramref name="played"/> stay
+    /// visible but dimmed and cannot be chosen. Otherwise the options are text on the plain
+    /// button (slot 311 / 312), 100 px apart and centred around y = 250. Returns the option's index.
     /// </summary>
-    private async Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot = -1, int hidden = 0)
+    private async Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot = -1, int played = 0)
     {
         m_skip = false;
         UpdateModeButtons();
@@ -451,64 +457,73 @@ public partial class PlayerWindow : Window
 
         var answer = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         ChoiceLayer.Children.Clear();
-        var shown = Enumerable.Range(0, options.Count).Where(i => (hidden & (1 << i)) == 0).ToList();
-
-        bool images = imageSlot >= 0 && shown.All(i => m_data.GetSystemFrame(imageSlot + i * 10) != null);
+        bool images = imageSlot >= 0 && Enumerable.Range(0, options.Count).All(i => m_data.GetSystemFrame(imageSlot + i * 10) != null);
         var plain = m_data.GetSystemFrame(311);
         var plainHot = m_data.GetSystemFrame(312) ?? plain;
 
-        for (int n = 0; n < shown.Count; n++)
+        for (int index = 0; index < options.Count; index++)
         {
-            int index = shown[n];
+            int option = index;
             FrameworkElement element;
-            double width, height;
+            bool enabled = true;
             if (images)
             {
                 var normal = m_data.GetSystemFrame(imageSlot + index * 10)!;
-                var hot = m_data.GetSystemFrame(imageSlot + index * 10 + 1) ?? normal;
-                element = HoverImage(normal.Image, hot.Image);
-                width = normal.Width;
-                height = normal.Height;
-            }
-            else if (plain != null)
-            {
-                var grid = new Grid { Width = plain.Width, Height = plain.Height };
-                grid.Children.Add(HoverImage(plain.Image, plainHot!.Image));
-                grid.Children.Add(new TextBlock
+                bool done = (played & (1 << index)) != 0;
+                if (done)
                 {
-                    Text = options[index], FontSize = 24, FontWeight = FontWeights.Bold, Foreground = Brushes.White,
-                    FontFamily = new FontFamily("Meiryo, Yu Gothic UI, MS Gothic"),
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                    IsHitTestVisible = false,
-                    Effect = new System.Windows.Media.Effects.DropShadowEffect { Color = Color.FromRgb(0x20, 0x30, 0x50), BlurRadius = 4, ShadowDepth = 1.5 },
-                });
-                element = grid;
-                width = plain.Width;
-                height = plain.Height;
+                    // Played: the "done" picture at 160/255, not selectable
+                    var dim = m_data.GetSystemFrame(imageSlot + index * 10 + 3) ?? normal;
+                    element = new Image { Source = dim.Image, Stretch = Stretch.Fill, Opacity = 160 / 255.0, Width = dim.Width, Height = dim.Height };
+                    enabled = false;
+                }
+                else
+                {
+                    var hot = m_data.GetSystemFrame(imageSlot + index * 10 + 1) ?? normal;
+                    element = HoverImage(normal.Image, hot.Image);
+                    element.Width = normal.Width;
+                    element.Height = normal.Height;
+                }
+                Canvas.SetLeft(element, 391 * (index / 4) + normal.OffsetX);
+                Canvas.SetTop(element, 86 * (index % 4) + normal.OffsetY);
             }
             else
             {
-                element = new Button { Content = options[index], FontSize = 22, Width = 520, Height = 64 };
-                width = 520;
-                height = 64;
+                double top = 250 - (96 + (options.Count - 1) * 100) / 2 - 48 + index * 100;
+                var row = new Canvas { Width = Stage.Width, Height = 96, Background = Brushes.Transparent };
+                if (plain != null)
+                {
+                    var button = HoverImage(plain.Image, plainHot!.Image);
+                    button.Width = plain.Width;
+                    button.Height = plain.Height;
+                    Canvas.SetLeft(button, plain.OffsetX);
+                    row.Children.Add(button);
+                }
+                // Style bank 2: ＭＳ ゴシック 31 px, black shadow at (1,1), centred between x 240 and 560, y + 32
+                var label = new TextBlock
+                {
+                    Text = options[index], FontSize = 31, Foreground = Brushes.White, IsHitTestVisible = false,
+                    FontFamily = new FontFamily("MS Gothic, ＭＳ ゴシック, Yu Gothic"),
+                    Effect = new System.Windows.Media.Effects.DropShadowEffect { Color = Colors.Black, BlurRadius = 0, ShadowDepth = 1.4, Direction = 315 },
+                };
+                label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetLeft(label, 240 + (320 - label.DesiredSize.Width) / 2);
+                Canvas.SetTop(label, 32);
+                row.Children.Add(label);
+                element = row;
+                Canvas.SetLeft(element, 0);
+                Canvas.SetTop(element, top);
             }
 
-            // Two columns of picture buttons, one column of text buttons
-            int columns = images && shown.Count > 4 ? 2 : 1;
-            int rows = (shown.Count + columns - 1) / columns;
-            double gap = 10;
-            double top = Math.Max(10, (Stage.Height - 20 - rows * (height + gap)) / 2);
-            double left = (Stage.Width - columns * width - (columns - 1) * gap) / 2;
-            Canvas.SetLeft(element, left + (n % columns) * (width + gap));
-            Canvas.SetTop(element, top + (n / columns) * (height + gap));
-            element.Cursor = Cursors.Hand;
-            element.MouseLeftButtonUp += (_, e) =>
+            if (enabled)
             {
-                e.Handled = true;
-                answer.TrySetResult(index);
-            };
-            if (element is Button button)
-                button.Click += (_, _) => answer.TrySetResult(index);
+                element.Cursor = Cursors.Hand;
+                element.MouseLeftButtonUp += (_, e) =>
+                {
+                    e.Handled = true;
+                    answer.TrySetResult(option);
+                };
+            }
             ChoiceLayer.Children.Add(element);
         }
 
