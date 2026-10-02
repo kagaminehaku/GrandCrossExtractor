@@ -273,3 +273,12 @@ drawing. A small interpreter for this subset could replace the hand-written `Sto
   900 = backlog page, 1000 = OPTION page. The game's slot pictures are fixed THSAVE.S25 thumbnails
   (frames 0-140, 100x75; mapping not decoded); the player stores a screenshot instead. A player
   save is {file, message number, routes played}; loading replays the file silently to that message.
+- **Message window bar**: SYSTEM.S25 120 QSAVE, 130 QLOAD, 100 AUTO, 80 SAVE, 90 LOAD, 150 SKIP,
+  140 OPTION, 110 TITLE, 190 QUIT, 180 × (hide window); +1 highlighted, +2 on.
+- **OPTION page** (1000): volume knobs 1600 / 1400 / 1500 (music, voice, SE; 197 px range, arrows
+  +10 / +20), ON 1820 / 1800 / 1810 and OFF +3, screen mode 1940 full / 1930 window, message
+  speed 1130 高速 ... 1100 遅い (`_w` 0 / 18 / 36 / 54 ms), auto wait 1230 ... 1200, message skip
+  1300 既読 / 1310 未読, TITLE 1050, BACK 1060. Engine defaults: sliders b[1] / b[2] / b[5] =
+  19 / 39 / 26 of 49, speed b[3] = 2 (標準).
+- **Backlog page** (900, semi-transparent): back 910, up / down 950 / 960, knob 901 between TOP and
+  END; names in `_c255,240,0` (yellow). 2200 is the "NEW" frame of the newest save slot.

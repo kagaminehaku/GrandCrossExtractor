@@ -13,8 +13,6 @@ public partial class PlayerWindow
     // Script variables (_D710 ...), kept for the whole run
     private readonly Dictionary<int, int> m_vars = new();
 
-    // Text speed of the default configuration: "_w" = b[3] (2) * 18 ms per character
-    private const int CharacterMs = 36;
 
     #region Flow
 
@@ -583,6 +581,14 @@ public partial class PlayerWindow
             UpdateModeButtons();
         }
 
+        // メッセージスキップ 既読: skipping stops at a message never read before
+        bool readBefore = MarkRead(m_file, index);
+        if (m_skip && !readBefore && !Config.SkipUnread)
+        {
+            m_skip = false;
+            UpdateModeButtons();
+        }
+
         SetSpeaker(line.Speaker);
         ShowMessageWindow();
         TxtNext.Visibility = Visibility.Collapsed;
@@ -596,10 +602,11 @@ public partial class PlayerWindow
 
         // Type the text out; a click shows the rest at once
         var click = NextClick();
-        for (int shown = 1; shown < text.Length; shown++)
+        int characterMs = Config.CharacterMs;
+        for (int shown = 1; characterMs > 0 && shown < text.Length; shown++)
         {
             SetMessageText(text, shown);
-            if (await Task.WhenAny(Task.Delay(CharacterMs, m_token), click) == click || Skipping)
+            if (await Task.WhenAny(Task.Delay(characterMs, m_token), click) == click || Skipping)
                 break;
             m_token.ThrowIfCancellationRequested();
         }
@@ -622,7 +629,7 @@ public partial class PlayerWindow
                 await Task.Delay(100, m_token);
             if (click.IsCompleted)
                 break;
-            var read = Task.Delay(voice != null ? 600 : 900 + 60 * text.Length, m_token);
+            var read = Task.Delay(Config.AutoDelay(text.Length, voice != null), m_token);
             if (await Task.WhenAny(read, click) == click || m_auto)
                 break;
         }

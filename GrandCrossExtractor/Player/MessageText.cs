@@ -77,6 +77,16 @@ public sealed class MessageText : FrameworkElement
         return positions;
     }
 
+    /// <summary>How many lines the text takes at the element's width.</summary>
+    public int LineCount
+    {
+        get
+        {
+            var positions = Layout();
+            return positions.Count == 0 ? 0 : (int)(positions[^1].Y / LineHeight) + 1;
+        }
+    }
+
     protected override void OnRender(DrawingContext dc)
     {
         if (m_text.Length == 0)

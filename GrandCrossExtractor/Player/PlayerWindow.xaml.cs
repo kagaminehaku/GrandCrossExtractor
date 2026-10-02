@@ -139,7 +139,7 @@ public partial class PlayerWindow : Window
             TitleLayer.Children.Clear();
             AddTitleButton(frames, 10, () => Start(null));       // スタート
             AddTitleButton(frames, 20, () => ShowSavePage(saving: false));   // ロード
-            AddTitleButton(frames, 30, null);                    // オプション: not available yet
+            AddTitleButton(frames, 30, ShowOption);              // オプション
             AddTitleButton(frames, 80, Close);                   // おわる
             TitleLayer.Visibility = Visibility.Visible;
         }
@@ -272,7 +272,7 @@ public partial class PlayerWindow : Window
         HideMessageWindow();
         ChoiceLayer.Visibility = Visibility.Collapsed;
         ChoiceLayer.Children.Clear();
-        LogLayer.Visibility = Visibility.Collapsed;
+        HideLog();
         m_userHidWindow = false;
         TitleLayer.Visibility = Visibility.Collapsed;
         TitleLayer.Children.Clear();
@@ -286,11 +286,12 @@ public partial class PlayerWindow : Window
     private void Advance()
     {
         if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible ||
-            TitleLayer.Visibility == Visibility.Visible || SaveLayer.Visibility == Visibility.Visible)
+            TitleLayer.Visibility == Visibility.Visible || SaveLayer.Visibility == Visibility.Visible ||
+            OptionLayer.Visibility == Visibility.Visible)
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
-            LogLayer.Visibility = Visibility.Collapsed;
+            HideLog();
             return;
         }
         if (m_userHidWindow)
@@ -314,8 +315,13 @@ public partial class PlayerWindow : Window
 
     private void Screen_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
+        // Right click closes a page, as in the game, or hides the message window
         if (LogLayer.Visibility == Visibility.Visible)
-            LogLayer.Visibility = Visibility.Collapsed;
+            HideLog();
+        else if (OptionLayer.Visibility == Visibility.Visible)
+            HideOption();
+        else if (SaveLayer.Visibility == Visibility.Visible)
+            HideSavePage();
         else
             ToggleHideWindow();
     }
@@ -379,8 +385,10 @@ public partial class PlayerWindow : Window
             case Key.Escape:
                 if (SaveLayer.Visibility == Visibility.Visible)
                     HideSavePage();
-                else                 if (LogLayer.Visibility == Visibility.Visible)
-                    LogLayer.Visibility = Visibility.Collapsed;
+                else if (OptionLayer.Visibility == Visibility.Visible)
+                    HideOption();
+                else if (LogLayer.Visibility == Visibility.Visible)
+                    HideLog();
                 else if (WindowStyle == WindowStyle.None)
                     ToggleFullScreen();
                 else if (MenuLayer.Visibility == Visibility.Visible)
@@ -414,14 +422,13 @@ public partial class PlayerWindow : Window
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
-            // Scrolling down past the newest line closes the log
-            if (e.Delta < 0 && LogScroll.VerticalOffset >= LogScroll.ScrollableHeight)
-            {
-                LogLayer.Visibility = Visibility.Collapsed;
-                e.Handled = true;
-            }
+            // Scrolling down past the newest message closes the backlog
+            ScrollLog(e.Delta < 0 ? 1 : -1);
+            e.Handled = true;
             return;
         }
+        if (OptionLayer.Visibility == Visibility.Visible || SaveLayer.Visibility == Visibility.Visible)
+            return;
         if (e.Delta > 0)
             ShowLog();
         else
@@ -475,6 +482,8 @@ public partial class PlayerWindow : Window
         BtnAuto.Tag = m_auto ? "On" : null;
         BtnSkip.Tag = Skipping ? "On" : null;
         TxtMode.Text = Skipping ? "SKIP ▶▶" : m_auto ? "AUTO ▶" : "";
+        // The AUTO / SKIP buttons of the message window show their state
+        BuildBar();
     }
 
     private WindowState m_restoreState;
@@ -665,36 +674,21 @@ public partial class PlayerWindow : Window
             m_log.RemoveRange(0, m_log.Count - LogLimit);
     }
 
-    private void ShowLog()
-    {
-        if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible || m_log.Count == 0)
-            return;
-        LogList.ItemsSource = null;
-        LogList.ItemsSource = m_log.ToList();
-        LogLayer.Visibility = Visibility.Visible;
-        LogScroll.UpdateLayout();
-        LogScroll.ScrollToEnd();
-    }
-
-    private void BtnCloseLog_Click(object sender, RoutedEventArgs e) => LogLayer.Visibility = Visibility.Collapsed;
-
-    private void BtnLogVoice_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: string voice } && m_data.ReadAudio(voice) is { } audio)
-            m_audio.Play(AudioEngine.Voice, audio, 1);
-    }
-
     #endregion
 
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
         Focus();
+        ApplyConfig();
+        BuildBar();
         ShowTitle(opening: true);
     }
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (m_read != null)
+            PlayerConfig.SaveRead(m_data.SchemeName, m_read);
         m_run?.Cancel();
         m_run = null;
         m_titleRun?.Cancel();

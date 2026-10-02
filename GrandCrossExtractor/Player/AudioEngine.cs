@@ -90,6 +90,16 @@ public sealed class AudioEngine : IDisposable
             return m_tracks.TryGetValue(channel, out var track) && !track.IsFinished;
     }
 
+    /// <summary>Applies changed volume settings to the sounds already playing.</summary>
+    public void UpdateVolumes()
+    {
+        lock (m_lock)
+        {
+            foreach (var (channel, track) in m_tracks)
+                track.Volume = VolumeOf(channel);
+        }
+    }
+
     public void Dispose()
     {
         m_output.Stop();

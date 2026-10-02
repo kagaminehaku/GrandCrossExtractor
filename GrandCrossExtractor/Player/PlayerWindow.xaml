@@ -57,21 +57,17 @@
                 <Canvas x:Name="StageCanvas" IsHitTestVisible="False"/>
 
                 <!-- Message window: SYSTEM.S25 slot 0 at (70,451), name plates 30+ -->
-                <Canvas x:Name="MessageLayer" Visibility="Collapsed" IsHitTestVisible="False">
-                    <Image x:Name="ImgWindow" Canvas.Left="70" Canvas.Top="451" Width="682" Height="147" Stretch="Fill"/>
-                    <Border x:Name="WindowFallback" Canvas.Left="70" Canvas.Top="451" Width="682" Height="147"
+                <Canvas x:Name="MessageLayer" Visibility="Collapsed">
+                    <Image x:Name="ImgWindow" Canvas.Left="70" Canvas.Top="451" Width="682" Height="147" Stretch="Fill" IsHitTestVisible="False"/>
+                    <Border x:Name="WindowFallback" Canvas.Left="70" Canvas.Top="451" Width="682" Height="147" IsHitTestVisible="False"
                             Background="#B0203048" BorderBrush="#8090C0" BorderThickness="2" CornerRadius="10" Visibility="Collapsed"/>
-                    <Image x:Name="ImgNamePlate" Stretch="Fill"/>
-                    <TextBlock x:Name="TxtName" Canvas.Left="150" Canvas.Top="458" FontSize="17" FontWeight="Bold"
-                               Foreground="#FFF6C8" FontFamily="Meiryo, Yu Gothic UI, MS Gothic">
-                        <TextBlock.Effect>
-                            <DropShadowEffect Color="#202040" BlurRadius="3" ShadowDepth="1" Opacity="1"/>
-                        </TextBlock.Effect>
-                    </TextBlock>
+                    <Image x:Name="ImgNamePlate" Stretch="Fill" IsHitTestVisible="False"/>
+                    <TextBlock x:Name="TxtName" Canvas.Left="150" Canvas.Top="458" FontSize="17" FontWeight="Bold" IsHitTestVisible="False"
+                               Foreground="#FFF6C8" FontFamily="MS Gothic, ＭＳ ゴシック, Yu Gothic"/>
                     <!-- Text area of START.SCN: (126,456), 575 wide, right margin 701 -->
-                    <local:MessageText x:Name="TxtMessage" Canvas.Left="126" Canvas.Top="456" Width="575" Height="140"/>
+                    <local:MessageText x:Name="TxtMessage" Canvas.Left="126" Canvas.Top="456" Width="575" Height="140" IsHitTestVisible="False"/>
                     <!-- Click wait icon: SYSTEM2.S25 slot 20 at its own offset -->
-                    <Image x:Name="TxtNext" Stretch="None" Visibility="Collapsed">
+                    <Image x:Name="TxtNext" Stretch="None" Visibility="Collapsed" IsHitTestVisible="False">
                         <Image.Triggers>
                             <EventTrigger RoutedEvent="Loaded">
                                 <BeginStoryboard>
@@ -82,6 +78,8 @@
                             </EventTrigger>
                         </Image.Triggers>
                     </Image>
+                    <!-- Bottom button bar of the message window: SYSTEM.S25 slots 80-190 -->
+                    <Canvas x:Name="BarLayer"/>
                 </Canvas>
 
                 <!-- Choices -->
@@ -95,38 +93,11 @@
                     </TextBlock.Effect>
                 </TextBlock>
 
-                <!-- Backlog -->
-                <Grid x:Name="LogLayer" Visibility="Collapsed" Background="#E8101018">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <DockPanel Margin="20,12,20,6">
-                        <Button Content="Close" DockPanel.Dock="Right" Style="{StaticResource BarBtn}" Click="BtnCloseLog_Click"/>
-                        <TextBlock Text="Backlog" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
-                        <TextBlock Text="  click 🔊 to hear a line again · right click or wheel down at the end to close" FontSize="11"
-                                   Foreground="#8A8A9E" VerticalAlignment="Center"/>
-                    </DockPanel>
-                    <ScrollViewer x:Name="LogScroll" Grid.Row="1" Margin="20,0,8,12" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl x:Name="LogList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <DockPanel Margin="0,0,10,12">
-                                        <Button Content="🔊" DockPanel.Dock="Left" VerticalAlignment="Top" Width="30" Margin="0,0,8,0"
-                                                Style="{StaticResource BarBtn}" Padding="2" Tag="{Binding Voice}" Click="BtnLogVoice_Click"
-                                                Visibility="{Binding VoiceVisibility}"/>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Speaker}" FontWeight="Bold" Foreground="#FFE08A" FontSize="13"
-                                                       Visibility="{Binding SpeakerVisibility}"/>
-                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="15"
-                                                       FontFamily="Meiryo, Yu Gothic UI, MS Gothic"/>
-                                        </StackPanel>
-                                    </DockPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
+                <!-- Backlog page: SYSTEM.S25 slot 900 with its TOP / END bar -->
+                <Canvas x:Name="LogLayer" Visibility="Collapsed" Background="Transparent"/>
+
+                <!-- OPTION page: SYSTEM.S25 slot 1000 -->
+                <Canvas x:Name="OptionLayer" Visibility="Collapsed" Background="Black"/>
 
                 <!-- Title screen of TOPMENU.SCN: TITLE.S25 buttons over its background -->
                 <Canvas x:Name="TitleLayer" Visibility="Collapsed" Background="Transparent"/>
