@@ -128,8 +128,11 @@
                     </ScrollViewer>
                 </Grid>
 
-                <!-- Start screen and chapter list -->
-                <Grid x:Name="MenuLayer" Background="#F2101016">
+                <!-- Title screen of TOPMENU.SCN: TITLE.S25 buttons over its background -->
+                <Canvas x:Name="TitleLayer" Visibility="Collapsed" Background="Transparent"/>
+
+                <!-- Chapter list -->
+                <Grid x:Name="MenuLayer" Background="#F2101016" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>

@@ -20,6 +20,9 @@ public sealed class MessageText : FrameworkElement
 
     private static readonly Typeface s_face = new(new FontFamily("MS Gothic, ＭＳ ゴシック, Yu Gothic"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
+    // Glyphs are the same for every message: lay each character out once
+    private readonly Dictionary<char, FormattedText> m_glyphs = new();
+
     private string m_text = "";
     private int m_shown;
 
@@ -91,8 +94,9 @@ public sealed class MessageText : FrameworkElement
                 dc.DrawImage(frame.Image, new Rect(p.X + frame.OffsetX, p.Y + frame.OffsetY, frame.Width, frame.Height));
                 continue;
             }
-            var glyph = new FormattedText(c.ToString(), CultureInfo.GetCultureInfo("ja-JP"), FlowDirection.LeftToRight,
-                                          s_face, FontHeight, Foreground, dpi);
+            if (!m_glyphs.TryGetValue(c, out var glyph))
+                m_glyphs[c] = glyph = new FormattedText(c.ToString(), CultureInfo.GetCultureInfo("ja-JP"), FlowDirection.LeftToRight,
+                                                        s_face, FontHeight, Foreground, dpi);
             dc.DrawText(glyph, p);
         }
     }

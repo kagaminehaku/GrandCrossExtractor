@@ -264,3 +264,7 @@ drawing. A small interpreter for this subset could replace the hand-written `Sto
 - **L_MONT** (function 304) queues like L_CHR (10001): its 5th argument is the plane
   transition of function 306, so an expression change cross-fades 500 ms on `$DRAW` unless
   A_CHR 152 gives another time.
+- **Title** (TOPMENU.SCN): voice `d\CMA002`, `d\logo_gc` (1 s fade, 3 s), `d\white` (0.4 s),
+  `d\caution` (0.6 s fade, until a click), `d\white`, then TITLE.S25 slot 0 with `m\oreplus_01`.
+  Buttons (function 230) are TITLE.S25 slot groups 10 スタート, 20 ロード, 30 オプション, 80 おわる
+  (slot + 1 = larger highlighted picture). After the ending SRC_MAIN loads topmenu.scn again.

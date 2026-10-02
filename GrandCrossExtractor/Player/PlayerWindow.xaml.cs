@@ -87,13 +87,108 @@ public partial class PlayerWindow : Window
         UpdateModeButtons();
     }
 
+    #region Title screen
+
+    // The title screen runs outside a story run; starting a chapter ends it
+    private CancellationTokenSource? m_titleRun;
+    private bool m_onTitle;
+
+    /// <summary>
+    /// TOPMENU.SCN: with <paramref name="opening"/> the title call (d\CMA002), the Grand Cross
+    /// logo (1 s fade, 3 s), white, the caution screen (until a click), white; then the title
+    /// picture with the theme and the four TITLE.S25 buttons.
+    /// </summary>
+    private async void ShowTitle(bool opening)
+    {
+        m_run?.Cancel();
+        m_run = null;
+        m_titleRun?.Cancel();
+        var run = new CancellationTokenSource();
+        m_titleRun = run;
+        m_token = run.Token;
+        m_skip = m_auto = false;
+        UpdateModeButtons();
+        HideMenu();
+        ResetScreen();
+        m_onTitle = true;
+        try
+        {
+            if (opening)
+            {
+                if (m_data.ReadAudio(@"d\CMA002.ogv") is { } call)
+                    m_audio.Play(AudioEngine.Voice, call, 1);
+                foreach (var (file, fade, hold) in new[] { (@"d\logo_gc.s25", 1000, 3000), (@"d\white.s25", 400, 0), (@"d\caution.s25", 600, -1), (@"d\white.s25", 400, 0) })
+                {
+                    m_stage.SetPlane(0, await LoadImageAsync(file));
+                    await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, fade, null));
+                    if (hold > 0)
+                        await WaitSkippableAsync(Task.Delay(hold, m_token));
+                    else if (hold < 0)
+                        await NextClick().WaitAsync(m_token);
+                }
+            }
+            var frames = (m_data.LoadFrames("TITLE.S25") ?? new()).ToDictionary(f => f.Slot);
+            if (frames.TryGetValue(0, out var background))
+                m_stage.SetPlane(0, new StageImage(background.Image, background.OffsetX, background.OffsetY));
+            await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, 400, null));
+            if (await Task.Run(() => m_data.ReadAudio(@"m\oreplus_01.ogv")) is { } theme)
+                m_audio.Play(AudioEngine.Music, theme, 0);
+            m_token.ThrowIfCancellationRequested();
+
+            TitleLayer.Children.Clear();
+            AddTitleButton(frames, 10, () => Start(null));       // スタート
+            AddTitleButton(frames, 20, ShowMenu);                // ロード: chapters until saves exist
+            AddTitleButton(frames, 30, null);                    // オプション: not available yet
+            AddTitleButton(frames, 80, Close);                   // おわる
+            TitleLayer.Visibility = Visibility.Visible;
+        }
+        catch (OperationCanceledException)
+        {
+            // A chapter was started, or the window closed
+        }
+    }
+
+    /// <summary>A TITLE.S25 button: slot = normal picture, slot + 1 = the larger highlighted one.</summary>
+    private void AddTitleButton(Dictionary<int, S25Frame> frames, int slot, Action? action)
+    {
+        if (!frames.TryGetValue(slot, out var normal))
+            return;
+        var hot = frames.GetValueOrDefault(slot + 1) ?? normal;
+        var image = new Image { Stretch = Stretch.Fill };
+        void Show(S25Frame f)
+        {
+            image.Source = f.Image;
+            image.Width = f.Width;
+            image.Height = f.Height;
+            Canvas.SetLeft(image, f.OffsetX);
+            Canvas.SetTop(image, f.OffsetY);
+        }
+        Show(normal);
+        if (action != null)
+        {
+            image.Cursor = Cursors.Hand;
+            image.MouseEnter += (_, _) => Show(hot);
+            image.MouseLeave += (_, _) => Show(normal);
+            image.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                action();
+            };
+        }
+        TitleLayer.Children.Add(image);
+    }
+
+    #endregion
+
     #region Menu
 
     private bool IsRunning => m_run != null;
 
     private void ShowMenu()
     {
-        BtnResume.Visibility = IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        // From the title screen the button goes back to it
+        BtnResume.Visibility = IsRunning || m_onTitle ? Visibility.Visible : Visibility.Collapsed;
+        BtnResume.Content = IsRunning ? "▶ Resume" : "◀ Title";
         BtnStart.Content = IsRunning ? "↺ Start from the beginning" : "▶ Start from the beginning";
         MenuLayer.Visibility = Visibility.Visible;
         m_stage.PauseMovie(true);
@@ -130,6 +225,9 @@ public partial class PlayerWindow : Window
     private async void Start(string? file)
     {
         m_run?.Cancel();
+        m_titleRun?.Cancel();
+        m_titleRun = null;
+        m_onTitle = false;
         var run = new CancellationTokenSource();
         m_run = run;
         m_token = run.Token;
@@ -141,12 +239,9 @@ public partial class PlayerWindow : Window
         try
         {
             await RunFlowAsync(file);
+            // The game goes back to the title screen after the ending
             if (m_run == run)
-            {
-                m_run = null;
-                ResetScreen();
-                ShowMenu();
-            }
+                ShowTitle(false);
         }
         catch (OperationCanceledException)
         {
@@ -160,7 +255,7 @@ public partial class PlayerWindow : Window
                 ResetScreen();
                 MessageBox.Show(this, $"The story stopped because of an error:\n{ex.Message}", "Play Story",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
-                ShowMenu();
+                ShowTitle(false);
             }
         }
     }
@@ -174,6 +269,8 @@ public partial class PlayerWindow : Window
         ChoiceLayer.Children.Clear();
         LogLayer.Visibility = Visibility.Collapsed;
         m_userHidWindow = false;
+        TitleLayer.Visibility = Visibility.Collapsed;
+        TitleLayer.Children.Clear();
     }
 
     #endregion
@@ -183,7 +280,8 @@ public partial class PlayerWindow : Window
     /// <summary>Click, Enter, Space: ends animations, shows the whole message, or goes on.</summary>
     private void Advance()
     {
-        if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible)
+        if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible ||
+            TitleLayer.Visibility == Visibility.Visible)
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
@@ -280,7 +378,7 @@ public partial class PlayerWindow : Window
                     ToggleFullScreen();
                 else if (MenuLayer.Visibility == Visibility.Visible)
                 {
-                    if (IsRunning)
+                    if (IsRunning || m_onTitle)
                         HideMenu();
                 }
                 else
@@ -585,12 +683,14 @@ public partial class PlayerWindow : Window
     {
         base.OnContentRendered(e);
         Focus();
+        ShowTitle(opening: true);
     }
 
     protected override void OnClosing(CancelEventArgs e)
     {
         m_run?.Cancel();
         m_run = null;
+        m_titleRun?.Cancel();
         m_stage.Reset();
         m_audio.Dispose();
         m_data.Dispose();
