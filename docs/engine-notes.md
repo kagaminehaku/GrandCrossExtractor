@@ -223,3 +223,26 @@ DRAW_EX 423F5, EFECT 42EC3, SE 454A6, EX 46E58, A_CHR 4766C, WAITA 41B0B, L_MONT
   direction (positive moves the picture right). **SE** `file, mode (0 once, 1 loop, 2 once and
   wait, 3 load only), channel` (slot = channel + 11). **MUSIC** `file, loop, fade-in ms`.
   **VOICE** `file, loop, slot, wait`. **SE_FADE** `ms, channel`.
+
+## 9. The other games (survey of all 11, 2026-10-03)
+
+| Engine (START.SCN) | Games | TXT command table vs Oreimo |
+|---|---|---|
+| v2.47 | Oreimo Plus, Azu Plus | Azu: no `L_MONT`, `WAIT_L_MOVIE` (40 commands) |
+| v2.49 | Homu, Yuru, Nyaru, Rikka, Sena, Kuroneko Plus | identical (42 commands, same ids) |
+| v2.49 | ERO-ON | subset (34 commands, PRELOAD renumbered) |
+| v2.50 | Maki Fes!, Re: Rem Plus | 53 commands: adds `WAITSE L_DELAY FADEVOICE L_SMOVIE L_ZBG L_ZBG2 LOOP DATE DELAYRUN DELAYRESET REGMSG L_PRIORITY` |
+
+Every scenario command used in any game is in that game's table. Beyond what the Oreimo
+player handles, the scripts use:
+
+- `L_MONT ...,m,slots` (9 games; slot lists, section 2) instead of Oreimo's `M` codes.
+- A_CHR 02 / 05 (loops, formulas known), 10, 11, 20, 50, 144 (Rikka); 43 / 44 (known).
+- DRAW_EX kinds 11, 16, 17, 44, 45; EFECT 16, 17 (ERO-ON), 29 (Re: Rem); `EX,10,0`; SE mode 2.
+- v2.50 only: `L_DELAY` (Maki Fes 133 uses), `DELAYRESET`, `MOVIE`; Re: Rem also `FACE`, `EMOTION`.
+
+SRC_MAIN.SCN of every game follows the Oreimo pattern (opening, route menu that hides played
+routes, ejaculation choices, ending). Across all 11 they use few instructions: mov / local / if /
+goto / gosub / lea / switch / case / eval and arithmetic; TXT files run through `gosub 240`
+(357 calls), menus through `callmod 0,203` or `callmod 0,270`; the rest is the staff roll's
+drawing. A small interpreter for this subset could replace the hand-written `StoryFlow`.
