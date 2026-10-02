@@ -108,6 +108,24 @@ public static class S25Composer
         }
     }
 
+    /// <summary>
+    /// Draws <paramref name="parts"/> over each other (first at the bottom) on a canvas just
+    /// large enough for them. Returns the picture and the screen position of its top-left corner.
+    /// Safe to call from any thread.
+    /// </summary>
+    public static (BitmapSource Image, int Left, int Top) ComposeFrames(IReadOnlyList<S25Frame> parts)
+    {
+        int left = parts.Min(f => f.OffsetX), top = parts.Min(f => f.OffsetY);
+        int width = parts.Max(f => f.OffsetX + (int)f.Width) - left;
+        int height = parts.Max(f => f.OffsetY + (int)f.Height) - top;
+        var canvas = new byte[width * height * 4];
+        foreach (var frame in parts)
+            Draw(canvas, width, left, top, frame);
+        var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, canvas, width * 4);
+        image.Freeze();
+        return (image, left, top);
+    }
+
     /// <summary>Alpha-blends a frame onto the canvas at its own offset (straight alpha, "over").</summary>
     private static void Draw(byte[] canvas, int canvasWidth, int left, int top, S25Frame frame)
     {

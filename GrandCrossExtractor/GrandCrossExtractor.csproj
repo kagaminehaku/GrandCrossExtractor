@@ -37,6 +37,8 @@
 
   <ItemGroup>
     <PackageReference Include="NVorbis" Version="0.10.5" />
+    <!-- Play Story: mixes BGM, voice and sound effects -->
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
   </ItemGroup>
 
 </Project>

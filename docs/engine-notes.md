@@ -1,6 +1,6 @@
 # ShiinaRio engine notes (GRAND†CROSS "Plus" games)
 
-Research notes for the extractor, the SCN tools (`tools/ScnTools`) and the planned **▶ Play Story**
+Research notes for the extractor, the SCN tools (`tools/ScnTools`) and the **▶ Play Story**
 player. Facts marked *(verified)* were checked against all 11 games' data or the engine code;
 everything else is an inference and says so.
 
@@ -31,8 +31,14 @@ Which combinations are shown is written in the scenario: `$L_MONT,<plane>,<file>
 switches the layer off. All ~4000 such commands in the 11 games point at existing slots. Zoomed CGs
 (`EV02_02L`, `..M`) are never named in the script; the engine swaps them in, and they share the
 slot table of the unzoomed file, so they use its combinations. Oreimo's sprite `KIR.S25` is
-changed with `$L_MONT,1,,0,0,0,M,101` (upper-case M, no file): these are expression codes
-(101-107, 155) mapped by the engine, not slots - **not decoded yet**.
+changed with `$L_MONT,1,,0,0,0,M,101` (upper-case M, no file): these are expression codes,
+looked up in `MONTBL.BIN` (in `_T`) *(verified)*:
+
+- 100,000 entries of 8 bytes, then a string table (`st\kir.s25`, `f\0.s25`, `st\kir_L.s25`).
+- Entry = u16 offset of the S25 name in the string table, u16 offset of a face picture name,
+  u32 with six 5-bit slot values (base, layers 1-5; 31 = layer off). All `FF` = unused code.
+- Oreimo: 101-107 = mouth 100 + eyes 200-206, 121-127 = the same with blush (300),
+  151-157 / 171-177 = open mouth 101; 2xx = the same on the zoomed `kir_L.s25`.
 
 About 3,700 eye/mouth frames are never used by any script combination. Possibly blink / lip-sync
 frames switched by the engine, or simply unused art - **unknown**.
@@ -40,26 +46,43 @@ frames switched by the engine, or simply unused art - **unknown**.
 ## 3. Scenario TXT
 
 Lines are commands `$NAME,args`, speaker lines `【name】`, dialogue `「...」`, narration, or
-comments `;`. Comments carry the writers' notes (`;/// 差分：... ///` = CG variant wanted here,
-`;※i ...` = director's instructions, `;;$L_MONT...` = disabled command). Oreimo Plus: 35 files,
-~15,000 lines, 4,538 text lines. Command use in Oreimo Plus:
+comments `;`. Every non-empty text line is one message (one click); no message spans two lines.
+Comments carry the writers' notes (`;【...】` = scene title, `;/// 差分：... ///` = CG variant
+wanted here, `;※i ...` = director's instructions, `;;$L_MONT...` = disabled command).
+`①` in the text is the heart gaiji (`GAIJI.S25` in `_D`). Oreimo Plus: 35 files, ~15,000
+lines, 2,842 messages. Command use in Oreimo Plus, as the story player (`Player/`) reads them:
 
-| Command | Uses | Understanding |
+| Command | Uses | Arguments and meaning |
 |---|---|---|
-| VOICE | 1116 | play voice `v\X.ogv` |
-| DRAW_EX | 592 | transition (`plane, rule mask S25 or empty, ms, wait?`) - partly |
-| L_CHR / L_BG | 372 / 352 | load picture into a plane (`plane, file, x, y, ?`) |
-| A_CHR | 334 | animation by numeric code (01, 40, 42, 50, 90, 128, 150-152...) - **unknown** |
-| DRAW | 200 | commit drawing - partly |
-| WAITA / WAIT | 152 / 120 | wait (click / ms) - partly |
-| WINDOW | 118 | message window on/off - partly |
-| EFECT | 67 | screen effect by number, implemented in `EFCLIB.SCN` - **unknown** |
-| L_MONT | 54 | layered picture, see section 2 |
-| EX,9,... | 36 | background scroll (`EX,9,0..4`) - partly |
-| L_MOVIE / WAIT_L_MOVIE | 36 / 18 | movie |
-| MUSIC / MUSIC_FADE, SE / SE_FADE | 63 / 32 | audio |
-| PRELOAD | 18 | can be ignored |
-| LABEL / CJUMP / EVENT_BLOCK | 4 | rare |
+| VOICE | 1116 | `file, ?` - voice of the next message |
+| DRAW_EX | 592 | `kind (0/1/2/47), rule S25 or empty, ms, wait` - show the prepared picture: cross-fade, or wipe along the rule mask (dark areas first) |
+| L_BG | 352 | `file, x, y, ?` - background plane 0; **also clears planes 1+** (face overlays like `ev01_01` would otherwise stay) |
+| L_CHR | 372 | `plane, file (empty = clear), x, y, ?[, m, slots...]` |
+| A_CHR | 334 | `code, plane, ...` - plane animation started by the next DRAW, see below |
+| DRAW | 200 | show the prepared picture at once (or with the A_CHR 152 cross-fade) |
+| WAITA | 152 | wait until animations and a non-looping movie end *(a movie with loop 0 is followed by WAITA)* |
+| WAIT | 120 | `ms` |
+| WINDOW | 118 | `0` = hide the message window (the next message shows it) |
+| EFECT | 67 | `n` (0, 1, 2, 12) - screen effect in `EFCLIB.SCN`; **not decoded**, shown as shakes / a flash |
+| L_MONT | 54 | `plane, file, x, y, ?, m/M, ...` - section 2 |
+| EX | 36 | `9,0,dir,width` / `9,1,layer,file` / `9,2,speed` / `9,4` = background scroll setup, picture, start, end (dir 1 = picture moves right, the character walks left; speed unit unknown); `10,2,var,value` = set `_Dvar`; `2,0` = wait for a key; `4` = ? |
+| L_MOVIE / WAIT_L_MOVIE | 36 / 18 | `plane, mv\file.mpg (empty = stop), loop, ?` / `plane` = wait for the end of the current round |
+| MUSIC / MUSIC_FADE | 31 / 32 | `file, ?` (empty = stop) / `[ms]` |
+| SE / SE_FADE | 25 / 7 | `file (empty = stop), plays (0 = loop), channel` / `ms, channel` |
+| PRELOAD | 18 | `file` - cache hint |
+| LABEL / CJUMP / EVENT_BLOCK | 4 | `n` / `_D710==0, label` / `1, label` = skipping inside the block jumps to the label |
+
+`A_CHR` codes *(guesses from the scripts' context unless marked)*: 00 stop and reset the plane;
+01 / 06 looping bounce / sway (`x, y, period`); 40 screen rect the plane is drawn into, 41 source
+rect shown in it (zoom / pan start, `x, y, w, h`), 42 pan / zoom the source rect (`x, y, w, h,
+ms, wait`) - checked against 1600x1200 CGs; 62 fade in through a rule (`rule, ms`); 114 / 128
+move to `x, y` (`ms, wait`); 150 fade out, 151 fade in (`ms, wait`); 152 cross-fade the plane's
+new picture (`ms`, after an expression change); 90 / 91 around expression changes (lip sync?).
+
+The message window is `SYSTEM.S25` (in `_D`) slot 0 at (70,451). Name plates are slot 29 + n,
+where n comes from `NWINTBL.BIN` (0x24-byte entries: Shift-JIS name, u32 n): 俺 = 30, 桐乃 = 31,
+ＰＣ = 32. Route menu buttons are slots 400 + 10·i (+1 highlighted), text choices use slot 311
+with the text drawn on it.
 
 Every resource Oreimo Plus references exists (1,515 files).
 
@@ -145,11 +168,20 @@ data), START 54 %, TOPMENU 56 % - START and TOPMENU still have unhandled special
 
 ## 6. Play Story - status
 
-Have: archive decryption, all resources, S25 composition, TXT format, game flow.
-Missing: renderer (planes, 800x600, rule-mask transitions, scrolling), text window and font,
-gaiji/ruby tables, simultaneous audio, movie playback (MPEG-1; mind LGPL for FFmpeg/LibVLC),
-meaning of A_CHR / EFECT / WINDOW details (in START.SCN), KIR expression codes, save/load.
-Plan: a story-reader first (text, voice, BGM, composed CGs, choices, fades), then fidelity.
+`GrandCrossExtractor/Player/` plays Oreimo Plus from beginning to end (all 35 files, every
+choice), reading the archives of the game folder:
+
+| File | Role |
+|---|---|
+| `StoryFlow.cs` | game flow from SRC_MAIN (opening, route menu, choices, ending) and the chapter list |
+| `ScenarioScript.cs` | TXT parser |
+| `GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
+| `Stage.cs` | 800x600 planes, snapshot-based DRAW / DRAW_EX (cross-fade, rule wipe), plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
+| `AudioEngine.cs` | NAudio mixer: BGM, voice, SE channels, loops, fades |
+| `PlayerWindow.*` | text window, name plates, choices, backlog, auto / skip, chapter list |
+
+Approximated: A_CHR codes (above), EFECT, the scroll speed, DRAW_EX kinds. Not done: saves,
+ruby, the engine's own lip sync / blinking, other games' flows (each needs its SRC_MAIN read).
 
 ## 7. Tools
 

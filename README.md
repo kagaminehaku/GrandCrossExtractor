@@ -46,6 +46,11 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   - The combinations come from the game's scenario scripts (the `.TXT` files in `*_T.WAR`), so that archive has to be in the same folder as the one you extract.
   - Files are named after the frames they combine, for example `ST_SENA@001+101+201.png`.
   - The few layered images the scripts never show are saved as separate frames.
+- **▶ Play Story** (Oreimo Plus for now):
+  - Open any archive of the game and click **▶ Play Story** to read the story with its pictures, voices, music, movies and choices, straight from the game folder.
+  - Start from the beginning or from any chapter in the list. The route menu and the choices work as in the game.
+  - Keys: click / Enter = next, right click = hide the text, mouse wheel up = backlog, hold Ctrl = skip, A = auto, Esc = menu, F11 = full screen.
+  - Some character animations and screen effects are approximations of the engine's, and there is no saving.
 
 ## Requirements
 
@@ -97,6 +102,7 @@ GARbro handles hundreds of engines. This project only covers Grand Cross games, 
 
 - **[GARbro](https://github.com/morkt/GARbro)** by morkt: the original ShiinaRio archive, encryption and media format code, and the initial scheme data for several games. MIT License.
 - **[NVorbis](https://github.com/NVorbis/NVorbis)**: Ogg Vorbis decoding for audio preview. MIT License.
+- **[NAudio](https://github.com/naudio/NAudio)**: audio mixing for Play Story. MIT License.
 
 ## License
 
