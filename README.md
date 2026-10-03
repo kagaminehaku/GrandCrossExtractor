@@ -47,10 +47,11 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   - Files are named after the frames they combine, for example `ST_SENA@001+101+201.png`.
   - The few layered images the scripts never show are saved as separate frames.
 - **▶ Play Story** (Oreimo Plus for now):
-  - Open any archive of the game and click **▶ Play Story** to read the story with its pictures, voices, music, movies and choices, straight from the game folder.
-  - Start from the beginning or from any chapter in the list. The route menu and the choices work as in the game.
-  - Keys: click / Enter = next, right click = hide the text, mouse wheel up = backlog, hold Ctrl = skip, A = auto, Esc = menu, F11 = full screen.
-  - Animations, transitions and screen effects follow the engine's own scripts (START.SCN, EFCLIB.SCN). There is no saving.
+  - Open any archive of the game and click **▶ Play Story** to play the story with its pictures, voices, music, movies and choices, straight from the game folder.
+  - It looks and plays like the game: the opening and title screen, the message window with its buttons (quick save / load, auto, save, load, skip, option, title, quit), the save and load pages, the OPTION page (volumes, screen mode, message speed, auto wait, skip read text only) and the backlog.
+  - Animations, transitions and screen effects follow the engine's own scripts (START.SCN, EFCLIB.SCN).
+  - Keys: click / Enter = next, right click = hide the text or close a page, mouse wheel up = backlog, hold Ctrl = skip, A = auto, Esc = chapter list, F11 = full screen. Move the mouse to the top for a tool bar with the chapter list, which starts the story from any scenario file.
+  - Saves, settings and the messages read are kept in `%AppData%\GrandCrossExtractor`.
 
 ## Requirements
 

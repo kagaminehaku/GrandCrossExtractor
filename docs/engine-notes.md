@@ -173,10 +173,15 @@ choice), reading the archives of the game folder:
 | `GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
 | `Stage.cs` | 800x600 planes, snapshot-based DRAW / DRAW_EX (cross-fade, rule wipe), plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
 | `AudioEngine.cs` | NAudio mixer: BGM, voice, SE channels, loops, fades |
-| `PlayerWindow.*` | text window, name plates, choices, backlog, auto / skip, chapter list |
+| `MessageText.cs` | message text with the engine's font metrics, kinsoku and gaiji |
+| `PlayerWindow.*` | title screen, message window and its button bar, choices, auto / skip, chapter list (`.Script` interpreter, `.Save` save / load pages, `.Option` OPTION page, backlog page, settings) |
+| `SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` |
 
-Command behaviour follows section 8. Approximated: the per-plane rule fade (A_CHR 60-63) uses
-the screen wipe formula, EFECT 3 / 6 flashes. Not done: saves, ruby, the engine's own lip sync / blinking, other games' flows (each needs its SRC_MAIN read).
+Command behaviour and the screens follow section 8. Approximated: the per-plane rule fade
+(A_CHR 60-63) uses the screen wipe formula, EFECT 3 / 6 flashes. Not done: THSAVE.S25 slot
+thumbnails (a screenshot is stored), the AUTO save page, the game's confirmation dialogs (Windows
+message boxes), ruby, the engine's own lip sync / blinking, other games' flows (each needs its
+SRC_MAIN read).
 
 ## 7. Tools
 

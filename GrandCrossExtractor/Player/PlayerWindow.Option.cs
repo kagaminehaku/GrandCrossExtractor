@@ -119,13 +119,31 @@ public partial class PlayerWindow
     {
         if (!CanSave)
             return;
-        Saves.Write(QuickSlot, new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now), StageThumbnail());
+        try
+        {
+            Saves.Write(QuickSlot, new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now), StageThumbnail());
+            ShowNotice("QUICK SAVE");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not save:\n{ex.Message}", "Quick save", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void QuickLoad()
     {
-        if (Saves.Read(QuickSlot) is { } data && Confirm("Load the quick save?"))
+        if (Saves.Read(QuickSlot) is not { } data)
+            ShowNotice("NO QUICK SAVE");
+        else if (Confirm("Load the quick save?"))
             Start(data.File, data.Played, data.Message);
+    }
+
+    /// <summary>Shows a short notice where the AUTO / SKIP mode is shown, then puts the mode back.</summary>
+    private async void ShowNotice(string text)
+    {
+        TxtMode.Text = text;
+        await Task.Delay(1500);
+        UpdateModeButtons();
     }
 
     #endregion
