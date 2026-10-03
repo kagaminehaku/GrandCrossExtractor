@@ -1,6 +1,6 @@
 // The game's in-story interface, drawn with SYSTEM.S25: the button bar of the message window
-// (slots 80-190), the OPTION page (1000) and the backlog page (900); plus the settings they
-// change and the record of messages already read.
+// (slots 80-190), the OPTION page (1000) and the backlog page (900). The settings they change
+// and the backlog itself are kept by StoryPlayer.
 
 using System.Windows;
 using System.Windows.Controls;
@@ -8,32 +8,23 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using GrandCrossExtractor.Formats;
+using GrandCrossExtractor.UI;
 
 namespace GrandCrossExtractor.Player;
 
 public partial class PlayerWindow
 {
-    private PlayerConfig? m_config;
-    private PlayerConfig Config => m_config ??= PlayerConfig.Load(m_data.SchemeName);
+    private PlayerConfig Config => m_player.Config;
 
-    private HashSet<string>? m_read;
-    private HashSet<string> Read => m_read ??= PlayerConfig.LoadRead(m_data.SchemeName);
+    private void SaveConfig() => m_player.SaveConfig();
 
-    private void SaveConfig() => Config.Save(m_data.SchemeName);
-
-    /// <summary>Volumes, text speed and screen mode from the settings.</summary>
+    /// <summary>Volumes and screen mode from the settings (the text speed is read as each message is shown).</summary>
     private void ApplyConfig()
     {
-        m_audio.MusicVolume = Config.MusicOn ? (float)Config.MusicVolume : 0;
-        m_audio.VoiceVolume = Config.VoiceOn ? (float)Config.VoiceVolume : 0;
-        m_audio.EffectVolume = Config.EffectOn ? (float)Config.EffectVolume : 0;
-        m_audio.UpdateVolumes();
+        m_player.ApplyAudioConfig();
         if (Config.FullScreen != (WindowStyle == WindowStyle.None))
             ToggleFullScreen();
     }
-
-    /// <summary>Marks a message as read; returns whether it had been read before.</summary>
-    private bool MarkRead(string file, int index) => !Read.Add($"{file}:{index}");
 
     /// <summary>
     /// A SYSTEM.S25 button on <paramref name="layer"/>: slot = normal, slot + 1 = highlighted,
@@ -48,7 +39,7 @@ public partial class PlayerWindow
         var image = new Image { Stretch = Stretch.Fill };
         void Show(S25Frame f)
         {
-            image.Source = f.Image;
+            image.Source = f.Image.ToBitmapSource();
             image.Width = f.Width;
             image.Height = f.Height;
             Canvas.SetLeft(image, f.OffsetX);
@@ -75,7 +66,7 @@ public partial class PlayerWindow
     {
         if (m_data.GetSystemFrame(slot) is not { } f)
             return;
-        var image = new Image { Source = f.Image, Width = f.Width, Height = f.Height, Stretch = Stretch.Fill, IsHitTestVisible = false };
+        var image = new Image { Source = f.Image.ToBitmapSource(), Width = f.Width, Height = f.Height, Stretch = Stretch.Fill, IsHitTestVisible = false };
         Canvas.SetLeft(image, f.OffsetX);
         Canvas.SetTop(image, f.OffsetY);
         layer.Children.Add(image);
@@ -89,10 +80,10 @@ public partial class PlayerWindow
         BarLayer.Children.Clear();
         SystemButton(BarLayer, 120, QuickSave);
         SystemButton(BarLayer, 130, QuickLoad);
-        SystemButton(BarLayer, 100, ToggleAuto, m_auto);
+        SystemButton(BarLayer, 100, ToggleAuto, m_player.Auto);
         SystemButton(BarLayer, 80, () => ShowSavePage(saving: true));
         SystemButton(BarLayer, 90, () => ShowSavePage(saving: false));
-        SystemButton(BarLayer, 150, ToggleSkip, m_skip);
+        SystemButton(BarLayer, 150, ToggleSkip, m_player.Skip);
         SystemButton(BarLayer, 140, ShowOption);
         SystemButton(BarLayer, 110, BackToTitle);
         SystemButton(BarLayer, 190, QuitGame);
@@ -108,7 +99,7 @@ public partial class PlayerWindow
             return;
         try
         {
-            Saves.Write(QuickSlot, NewSave(Math.Max(0, m_messageIndex - 1), m_lastText), SaveThumbnail());
+            Saves.Write(QuickSlot, m_player.CurrentSave(), m_player.SaveThumbnail());
             ShowNotice("QUICK SAVE");
         }
         catch (Exception ex)
@@ -187,7 +178,7 @@ public partial class PlayerWindow
             OptionLayer.Children.Add(track);
             SystemButton(OptionLayer, knob + 10, () => Change(get() - 1 / 49.0));
             SystemButton(OptionLayer, knob + 20, () => Change(get() + 1 / 49.0));
-            var image = new Image { Source = frame.Image, Width = frame.Width, Height = frame.Height, IsHitTestVisible = false };
+            var image = new Image { Source = frame.Image.ToBitmapSource(), Width = frame.Width, Height = frame.Height, IsHitTestVisible = false };
             Canvas.SetLeft(image, frame.OffsetX + Range * get());
             Canvas.SetTop(image, frame.OffsetY);
             OptionLayer.Children.Add(image);
@@ -225,8 +216,10 @@ public partial class PlayerWindow
 
     #region Backlog page
 
-    // First message shown on the backlog page (index into m_log)
+    // First message shown on the backlog page (index into the player's log)
     private int m_logTop;
+
+    private IReadOnlyList<LogEntry> m_log => m_player.Log;
 
     private const double LogLeft = 126, LogTextTop = 40, LogBottom = 560;
 
@@ -245,12 +238,9 @@ public partial class PlayerWindow
         LogLayer.Children.Clear();
     }
 
-    private double LogHeight(LogEntry entry)
-    {
-        var text = new MessageText { Width = MessageText.FullAdvance * 25 };
-        text.SetText(entry.Text, entry.Text.Length);
-        return (entry.Speaker.Length > 0 ? MessageText.LineHeight : 0) + text.LineCount * MessageText.LineHeight + 12;
-    }
+    private static double LogHeight(LogEntry entry) =>
+        (entry.Speaker.Length > 0 ? MessageText.LineHeight : 0) +
+        MessageLayout.LineCount(entry.Text, MessageText.FullAdvance * 25) * MessageText.LineHeight + 12;
 
     /// <summary>The first message to show so that the newest one ends the page.</summary>
     private int LastLogTop()
@@ -286,7 +276,7 @@ public partial class PlayerWindow
         {
             int last = Math.Max(1, LastLogTop());
             double y = knob.OffsetY + (494 - 79 - knob.OffsetY) * Math.Min(1.0, m_logTop / (double)last);
-            var image = new Image { Source = knob.Image, Width = knob.Width, Height = knob.Height, IsHitTestVisible = false };
+            var image = new Image { Source = knob.Image.ToBitmapSource(), Width = knob.Width, Height = knob.Height, IsHitTestVisible = false };
             Canvas.SetLeft(image, knob.OffsetX);
             Canvas.SetTop(image, y);
             LogLayer.Children.Add(image);

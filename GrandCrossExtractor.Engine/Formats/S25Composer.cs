@@ -8,9 +8,6 @@
 // offset. Which combinations the game shows is written in the scenario scripts; see
 // S25ScriptIndex.
 
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-
 namespace GrandCrossExtractor.Formats;
 
 public sealed class S25Layout
@@ -84,7 +81,7 @@ public static class S25Composer
     /// "{baseName}@{slot}+{slot}+…" with 3-digit slot numbers.
     /// Pictures are produced one at a time, so large sets do not have to fit in memory.
     /// </summary>
-    public static IEnumerable<(string Name, BitmapSource Image)> Compose(
+    public static IEnumerable<(string Name, PixelImage Image)> Compose(
         string baseName, IReadOnlyList<S25Frame> frames, S25Layout layout, IEnumerable<IReadOnlyList<int>> combinations)
     {
         var bySlot = frames.ToDictionary(f => f.Slot);
@@ -102,8 +99,8 @@ public static class S25Composer
             foreach (int slot in combination)
                 Draw(canvas, width, left, top, bySlot[slot]);
 
-            var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, canvas, width * 4);
-            image.Freeze();
+            // The canvas is reused for the next picture: hand out a copy
+            var image = new PixelImage(width, height, PixelLayout.Bgra32, (byte[])canvas.Clone());
             yield return ($"{baseName}@{string.Join("+", combination.Select(s => s.ToString("D3")))}.png", image);
         }
     }
@@ -113,7 +110,7 @@ public static class S25Composer
     /// large enough for them. Returns the picture and the screen position of its top-left corner.
     /// Safe to call from any thread.
     /// </summary>
-    public static (BitmapSource Image, int Left, int Top) ComposeFrames(IReadOnlyList<S25Frame> parts)
+    public static (PixelImage Image, int Left, int Top) ComposeFrames(IReadOnlyList<S25Frame> parts)
     {
         int left = parts.Min(f => f.OffsetX), top = parts.Min(f => f.OffsetY);
         int width = parts.Max(f => f.OffsetX + (int)f.Width) - left;
@@ -121,9 +118,7 @@ public static class S25Composer
         var canvas = new byte[width * height * 4];
         foreach (var frame in parts)
             Draw(canvas, width, left, top, frame);
-        var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, canvas, width * 4);
-        image.Freeze();
-        return (image, left, top);
+        return (new PixelImage(width, height, PixelLayout.Bgra32, canvas), left, top);
     }
 
     /// <summary>Alpha-blends a frame onto the canvas at its own offset (straight alpha, "over").</summary>
@@ -136,27 +131,7 @@ public static class S25Composer
             int s = y * fw * 4;
             int d = ((frame.OffsetY - top + y) * canvasWidth + (frame.OffsetX - left)) * 4;
             for (int x = 0; x < fw; x++, s += 4, d += 4)
-            {
-                int sa = src[s + 3];
-                if (sa == 0)
-                    continue;
-                int da = canvas[d + 3];
-                if (sa == 255 || da == 0)
-                {
-                    canvas[d] = src[s];
-                    canvas[d + 1] = src[s + 1];
-                    canvas[d + 2] = src[s + 2];
-                    canvas[d + 3] = (byte)sa;
-                    continue;
-                }
-                // out = src + dst * (1 - srcA), with colours weighted by their alpha
-                int dw = da * (255 - sa) / 255;
-                int oa = sa + dw;
-                canvas[d] = (byte)((src[s] * sa + canvas[d] * dw) / oa);
-                canvas[d + 1] = (byte)((src[s + 1] * sa + canvas[d + 1] * dw) / oa);
-                canvas[d + 2] = (byte)((src[s + 2] * sa + canvas[d + 2] * dw) / oa);
-                canvas[d + 3] = (byte)oa;
-            }
+                PixelImage.BlendPixel(src, s, canvas, d);
         }
     }
 }

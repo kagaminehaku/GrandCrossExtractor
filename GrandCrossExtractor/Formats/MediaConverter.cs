@@ -2,7 +2,7 @@
 // the way GARbro does by default: S25/MI4 → PNG, OGV → OGG, PAD → WAV.
 
 using System.IO;
-using System.Windows.Media.Imaging;
+using GrandCrossExtractor.UI;
 
 namespace GrandCrossExtractor.Formats;
 
@@ -53,12 +53,5 @@ public static class MediaConverter
         return new[] { (entryName, data) };
     }
 
-    private static byte[] EncodePng(BitmapSource image)
-    {
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(image));
-        using var ms = new MemoryStream();
-        encoder.Save(ms);
-        return ms.ToArray();
-    }
+    private static byte[] EncodePng(PixelImage image) => Bitmaps.EncodePng(image.ToBitmapSource());
 }

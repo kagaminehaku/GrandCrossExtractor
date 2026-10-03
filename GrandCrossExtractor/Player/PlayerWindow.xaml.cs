@@ -1,6 +1,7 @@
 // Story player window: shows a game's scenario the way the engine does (pictures, text,
-// voice, music, choices), reading everything from the game's own archives.
-// The script interpreter is in PlayerWindow.Script.cs.
+// voice, music, choices), reading everything from the game's own archives. The story itself
+// (flow, commands, modes, saves) runs in the engine library's StoryPlayer; this window is its
+// IStoryView and draws the screen (Stage), the message window, the choices and the pages.
 
 using System.ComponentModel;
 using System.Windows;
@@ -10,48 +11,26 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using GrandCrossExtractor.Formats;
+using GrandCrossExtractor.UI;
 
 namespace GrandCrossExtractor.Player;
 
-public partial class PlayerWindow : Window
+public partial class PlayerWindow : Window, IStoryView
 {
     private readonly GameData m_data;
     private readonly StoryFlow m_flow;
     private readonly Stage m_stage;
-    private readonly AudioEngine m_audio;
+    private readonly StoryPlayer m_player;
+
+    private AudioEngine m_audio => m_player.Audio;
 
     private CancellationTokenSource? m_run;
 
-    // The token of the run that this code belongs to. It flows with the async calls, so a run that
-    // was replaced keeps its own cancelled token and stops instead of taking on the new one.
-    private readonly AsyncLocal<CancellationToken> m_runToken = new();
-    private CancellationToken m_token
-    {
-        get => m_runToken.Value;
-        set => m_runToken.Value = value;
-    }
-
-    // Modes
-    private bool m_auto;
-    private bool m_skip;
-    private bool m_ctrlHeld;
-    // Loading a save passes the messages before the saved one like skipping does
-    private bool Skipping => m_skip || m_ctrlHeld || m_restoreTo >= 0;
-
-    // A click (or Enter, Space, ...) the script is waiting for
-    private TaskCompletionSource? m_click;
+    // The token of the run (story or title screen) the calling code belongs to
+    private CancellationToken m_token => m_player.Token;
 
     // The message window was hidden by the user (right click); the next click shows it again
     private bool m_userHidWindow;
-
-    public sealed record LogEntry(string Speaker, string Text, string? Voice)
-    {
-        public Visibility SpeakerVisibility => Speaker.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility VoiceVisibility => Voice != null ? Visibility.Visible : Visibility.Hidden;
-    }
-
-    private readonly List<LogEntry> m_log = new();
-    private const int LogLimit = 2000;
 
     public PlayerWindow(GameData data, StoryFlow flow)
     {
@@ -59,7 +38,7 @@ public partial class PlayerWindow : Window
         m_data = data;
         m_flow = flow;
         m_stage = new Stage(StageCanvas);
-        m_audio = new AudioEngine();
+        m_player = new StoryPlayer(data, flow, m_stage, this, new AudioEngine(new WaveOutput()));
 
         Title = $"Play Story - {flow.Title}";
         TxtTitle.Text = flow.Title;
@@ -73,7 +52,7 @@ public partial class PlayerWindow : Window
         var window = data.GetSystemFrame(0);
         if (window != null)
         {
-            ImgWindow.Source = window.Image;
+            ImgWindow.Source = window.Image.ToBitmapSource();
             Canvas.SetLeft(ImgWindow, window.OffsetX);
             Canvas.SetTop(ImgWindow, window.OffsetY);
             ImgWindow.Width = window.Width;
@@ -89,7 +68,7 @@ public partial class PlayerWindow : Window
         TxtMessage.Gaiji = c => gaiji != null && c - '①' is int i && i >= 0 && i < gaiji.Count ? gaiji[i] : null;
         if (data.LoadFrames("SYSTEM2.S25")?.FirstOrDefault(f => f.Slot == 20) is { } wait)
         {
-            TxtNext.Source = wait.Image;
+            TxtNext.Source = wait.Image.ToBitmapSource();
             Canvas.SetLeft(TxtNext, wait.OffsetX);
             Canvas.SetTop(TxtNext, wait.OffsetY);
         }
@@ -103,9 +82,9 @@ public partial class PlayerWindow : Window
     private bool m_onTitle;
 
     /// <summary>
-    /// TOPMENU.SCN: with <paramref name="opening"/> the title call (d\CMA002), the Grand Cross
-    /// logo (1 s fade, 3 s), white, the caution screen (until a click), white; then the title
-    /// picture with the theme and the four TITLE.S25 buttons.
+    /// The title screen (TOPMENU.SCN, StoryPlayer.PlayTitleAsync): with <paramref name="opening"/>
+    /// the logo and caution screens first; then the title picture with the theme and the four
+    /// TITLE.S25 buttons.
     /// </summary>
     private async void ShowTitle(bool opening)
     {
@@ -114,35 +93,13 @@ public partial class PlayerWindow : Window
         m_titleRun?.Cancel();
         var run = new CancellationTokenSource();
         m_titleRun = run;
-        m_token = run.Token;
-        m_skip = m_auto = false;
-        UpdateModeButtons();
+        m_player.BeginRun(run.Token);
         HideMenu();
         ResetScreen();
         m_onTitle = true;
         try
         {
-            if (opening)
-            {
-                if (m_data.ReadAudio(@"d\CMA002.ogv") is { } call)
-                    m_audio.Play(AudioEngine.Voice, call, 1);
-                foreach (var (file, fade, hold) in new[] { (@"d\logo_gc.s25", 1000, 3000), (@"d\white.s25", 400, 0), (@"d\caution.s25", 600, -1), (@"d\white.s25", 400, 0) })
-                {
-                    m_stage.SetPlane(0, await LoadImageAsync(file));
-                    await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, fade, null));
-                    if (hold > 0)
-                        await WaitSkippableAsync(Task.Delay(hold, m_token));
-                    else if (hold < 0)
-                        await NextClick().WaitAsync(m_token);
-                }
-            }
-            var frames = (m_data.LoadFrames("TITLE.S25") ?? new()).ToDictionary(f => f.Slot);
-            if (frames.TryGetValue(0, out var background))
-                m_stage.SetPlane(0, new StageImage(background.Image, background.OffsetX, background.OffsetY));
-            await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, 400, null));
-            if (await Task.Run(() => m_data.ReadAudio(@"m\oreplus_01.ogv")) is { } theme)
-                m_audio.Play(AudioEngine.Music, theme, 0);
-            m_token.ThrowIfCancellationRequested();
+            var frames = await m_player.PlayTitleAsync(opening);
 
             TitleLayer.Children.Clear();
             AddTitleButton(frames, 10, () => Start(null));       // スタート
@@ -166,7 +123,7 @@ public partial class PlayerWindow : Window
         var image = new Image { Stretch = Stretch.Fill };
         void Show(S25Frame f)
         {
-            image.Source = f.Image;
+            image.Source = f.Image.ToBitmapSource();
             image.Width = f.Width;
             image.Height = f.Height;
             Canvas.SetLeft(image, f.OffsetX);
@@ -242,18 +199,14 @@ public partial class PlayerWindow : Window
         m_onTitle = false;
         var run = new CancellationTokenSource();
         m_run = run;
-        m_token = run.Token;
-        m_restoreTo = message;
-        m_restoreByLine = byLine;
-        m_skip = m_auto = false;
-        UpdateModeButtons();
+        m_player.BeginRun(run.Token, message, byLine);
         HideMenu();
         ResetScreen();
 
         try
         {
             // A save of the flow script restarts it with its variables; older saves start at the file
-            await RunFlowAsync(vars == null ? file : null, played, vars);
+            await m_player.RunAsync(vars == null ? file : null, played, vars);
             // The game goes back to the title screen after the ending
             if (m_run == run)
                 ShowTitle(false);
@@ -311,14 +264,7 @@ public partial class PlayerWindow : Window
                 MessageLayer.Visibility = Visibility.Visible;
             return;
         }
-        m_click?.TrySetResult();
-    }
-
-    private Task NextClick()
-    {
-        if (m_click == null || m_click.Task.IsCompleted)
-            m_click = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        return m_click.Task;
+        m_player.Click();
     }
 
     private void Screen_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) => Advance();
@@ -380,13 +326,7 @@ public partial class PlayerWindow : Window
                 break;
             case Key.LeftCtrl:
             case Key.RightCtrl:
-                if (!m_ctrlHeld)
-                {
-                    m_ctrlHeld = true;
-                    UpdateModeButtons();
-                    m_stage.FinishAll();
-                    m_click?.TrySetResult();
-                }
+                m_player.SetCtrlHeld(true);
                 break;
             case Key.A:
                 ToggleAuto();
@@ -430,10 +370,7 @@ public partial class PlayerWindow : Window
     private void Window_PreviewKeyUp(object sender, KeyEventArgs e)
     {
         if (e.Key is Key.LeftCtrl or Key.RightCtrl)
-        {
-            m_ctrlHeld = false;
-            UpdateModeButtons();
-        }
+            m_player.SetCtrlHeld(false);
     }
 
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -473,35 +410,15 @@ public partial class PlayerWindow : Window
 
     private void BtnFullScreen_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
 
-    private void ToggleAuto()
-    {
-        m_auto = !m_auto;
-        if (m_auto)
-            m_skip = false;
-        UpdateModeButtons();
-        m_modeChanged?.TrySetResult();
-    }
+    private void ToggleAuto() => m_player.ToggleAuto();
 
-    private void ToggleSkip()
-    {
-        m_skip = !m_skip;
-        if (m_skip)
-        {
-            m_auto = false;
-            m_stage.FinishAll();
-            m_click?.TrySetResult();
-        }
-        UpdateModeButtons();
-    }
-
-    // Wakes a message that waits in auto mode when the mode changes
-    private TaskCompletionSource? m_modeChanged;
+    private void ToggleSkip() => m_player.ToggleSkip();
 
     private void UpdateModeButtons()
     {
-        BtnAuto.Tag = m_auto ? "On" : null;
-        BtnSkip.Tag = Skipping ? "On" : null;
-        TxtMode.Text = Skipping ? "SKIP ▶▶" : m_auto ? "AUTO ▶" : "";
+        BtnAuto.Tag = m_player.Auto ? "On" : null;
+        BtnSkip.Tag = m_player.Skipping ? "On" : null;
+        TxtMode.Text = m_player.Skipping ? "SKIP ▶▶" : m_player.Auto ? "AUTO ▶" : "";
         // The AUTO / SKIP buttons of the message window show their state
         BuildBar();
     }
@@ -552,7 +469,7 @@ public partial class PlayerWindow : Window
         var plate = speaker != null ? m_data.GetNamePlate(speaker) : null;
         if (plate != null)
         {
-            ImgNamePlate.Source = plate.Image;
+            ImgNamePlate.Source = plate.Image.ToBitmapSource();
             ImgNamePlate.Width = plate.Width;
             ImgNamePlate.Height = plate.Height;
             Canvas.SetLeft(ImgNamePlate, plate.OffsetX);
@@ -572,6 +489,24 @@ public partial class PlayerWindow : Window
 
     #endregion
 
+    #region IStoryView
+
+    void IStoryView.ShowMessageWindow() => ShowMessageWindow();
+
+    void IStoryView.HideMessageWindow() => HideMessageWindow();
+
+    void IStoryView.SetSpeaker(string? speaker) => SetSpeaker(speaker);
+
+    void IStoryView.SetMessageText(string text, int shown) => SetMessageText(text, shown);
+
+    void IStoryView.ShowClickWait(bool visible) => TxtNext.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+
+    void IStoryView.ModesChanged() => UpdateModeButtons();
+
+    Task<int> IStoryView.ChooseAsync(IReadOnlyList<string> options, int imageSlot, int played) => ChooseAsync(options, imageSlot, played);
+
+    #endregion
+
     #region Choices
 
     /// <summary>
@@ -582,13 +517,8 @@ public partial class PlayerWindow : Window
     /// visible but dimmed and cannot be chosen. Otherwise the options are text on the plain
     /// button (slot 311 / 312), 100 px apart and centred around y = 250. Returns the option's index.
     /// </summary>
-    private async Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot = -1, int played = 0)
+    private async Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot, int played)
     {
-        m_skip = false;
-        UpdateModeButtons();
-        HideMessageWindow();
-        m_stage.FinishAll();
-
         var answer = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         ChoiceLayer.Children.Clear();
         bool images = imageSlot >= 0 && Enumerable.Range(0, options.Count).All(i => m_data.GetSystemFrame(imageSlot + i * 10) != null);
@@ -608,13 +538,13 @@ public partial class PlayerWindow : Window
                 {
                     // Played: the "done" picture at 160/255, not selectable
                     var dim = m_data.GetSystemFrame(imageSlot + index * 10 + 3) ?? normal;
-                    element = new Image { Source = dim.Image, Stretch = Stretch.Fill, Opacity = 160 / 255.0, Width = dim.Width, Height = dim.Height };
+                    element = new Image { Source = dim.Image.ToBitmapSource(), Stretch = Stretch.Fill, Opacity = 160 / 255.0, Width = dim.Width, Height = dim.Height };
                     enabled = false;
                 }
                 else
                 {
                     var hot = m_data.GetSystemFrame(imageSlot + index * 10 + 1) ?? normal;
-                    element = HoverImage(normal.Image, hot.Image);
+                    element = HoverImage(normal.Image.ToBitmapSource(), hot.Image.ToBitmapSource());
                     element.Width = normal.Width;
                     element.Height = normal.Height;
                 }
@@ -631,7 +561,7 @@ public partial class PlayerWindow : Window
                     var dim = m_data.GetSystemFrame(314) ?? plain;
                     if (dim != null)
                     {
-                        var picture = new Image { Source = dim.Image, Stretch = Stretch.Fill, Width = dim.Width, Height = dim.Height };
+                        var picture = new Image { Source = dim.Image.ToBitmapSource(), Stretch = Stretch.Fill, Width = dim.Width, Height = dim.Height };
                         Canvas.SetLeft(picture, dim.OffsetX);
                         row.Children.Add(picture);
                     }
@@ -640,7 +570,7 @@ public partial class PlayerWindow : Window
                 }
                 else if (plain != null)
                 {
-                    var button = HoverImage(plain.Image, plainHot!.Image);
+                    var button = HoverImage(plain.Image.ToBitmapSource(), plainHot!.Image.ToBitmapSource());
                     button.Width = plain.Width;
                     button.Height = plain.Height;
                     Canvas.SetLeft(button, plain.OffsetX);
@@ -677,9 +607,7 @@ public partial class PlayerWindow : Window
         ChoiceLayer.Visibility = Visibility.Visible;
         try
         {
-            int result = await answer.Task.WaitAsync(m_token);
-            AddLog("", $"⇒ {options[result]}", null);
-            return result;
+            return await answer.Task.WaitAsync(m_token);
         }
         finally
         {
@@ -698,17 +626,6 @@ public partial class PlayerWindow : Window
 
     #endregion
 
-    #region Backlog
-
-    private void AddLog(string speaker, string text, string? voice)
-    {
-        m_log.Add(new LogEntry(speaker, text, voice));
-        if (m_log.Count > LogLimit)
-            m_log.RemoveRange(0, m_log.Count - LogLimit);
-    }
-
-    #endregion
-
     protected override void OnContentRendered(EventArgs e)
     {
         base.OnContentRendered(e);
@@ -720,14 +637,12 @@ public partial class PlayerWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (m_read != null)
-            PlayerConfig.SaveRead(m_data.SchemeName, m_read);
         m_run?.Cancel();
         m_run = null;
         m_titleRun?.Cancel();
         m_stage.Reset();
-        m_audio.Dispose();
-        m_data.Dispose();
+        // Keeps the messages read, and closes the sound and the archives
+        m_player.Dispose();
         base.OnClosing(e);
     }
 }

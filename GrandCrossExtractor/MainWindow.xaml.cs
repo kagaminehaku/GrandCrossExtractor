@@ -340,8 +340,8 @@ public partial class MainWindow : Window
                     var bmp = Mi4Decoder.Decode(data);
                     if (bmp != null)
                     {
-                        ImgPreview.Source = bmp;
-                        TxtPreviewDetails.Text += $" | {bmp.PixelWidth}x{bmp.PixelHeight} px (MI4)";
+                        ImgPreview.Source = bmp.ToBitmapSource();
+                        TxtPreviewDetails.Text += $" | {bmp.Width}x{bmp.Height} px (MI4)";
                         PanelImagePreview.Visibility = Visibility.Visible;
                         return;
                     }
@@ -422,7 +422,7 @@ public partial class MainWindow : Window
     {
         if (m_currentS25Frames == null || index < 0 || index >= m_currentS25Frames.Count) return;
         var frame = m_currentS25Frames[index];
-        ImgPreview.Source = frame.Image;
+        ImgPreview.Source = frame.Image.ToBitmapSource();
         TxtPreviewDetails.Text = $"Frame {index + 1}/{m_currentS25Frames.Count} | {frame.Width}x{frame.Height} px | Offset: ({frame.OffsetX}, {frame.OffsetY})";
         TxtFrameIndicator.Text = $"{index + 1} / {m_currentS25Frames.Count}";
     }
@@ -605,11 +605,7 @@ public partial class MainWindow : Window
         if (standaloneFrames != null)
         {
             var frame = standaloneFrames[(int)entry.Offset];
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(frame.Image));
-            using var ms = new MemoryStream();
-            encoder.Save(ms);
-            return new[] { (entry.Name, ms.ToArray()) };
+            return new[] { (entry.Name, Bitmaps.EncodePng(frame.Image.ToBitmapSource())) };
         }
         if (archive == null)
             throw new InvalidOperationException("No archive is open.");

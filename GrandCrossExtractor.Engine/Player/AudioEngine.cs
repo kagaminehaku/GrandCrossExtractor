@@ -1,11 +1,18 @@
 // Plays the story's sounds at the same time: BGM, voice and numbered sound-effect channels,
-// each with its own loop flag and fades, mixed into one output.
+// each with its own loop flag and fades, mixed into one output. The mixed samples go to an
+// IAudioOutput, the sound device of the front end.
 
 using System.IO;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
 namespace GrandCrossExtractor.Player;
+
+/// <summary>A sound device that plays the mixer's output (44.1 kHz stereo floats) until disposed.</summary>
+public interface IAudioOutput : IDisposable
+{
+    void Start(ISampleProvider source);
+}
 
 public sealed class AudioEngine : IDisposable
 {
@@ -15,7 +22,7 @@ public sealed class AudioEngine : IDisposable
     public const string Voice = "voice";
     public static string Effect(int channel) => "se" + channel;
 
-    private readonly WaveOutEvent m_output;
+    private readonly IAudioOutput m_output;
     private readonly MixingSampleProvider m_mixer;
     private readonly Dictionary<string, Track> m_tracks = new();
     private readonly object m_lock = new();
@@ -25,12 +32,11 @@ public sealed class AudioEngine : IDisposable
     public float VoiceVolume { get; set; } = 1.0f;
     public float EffectVolume { get; set; } = 0.8f;
 
-    public AudioEngine()
+    public AudioEngine(IAudioOutput output)
     {
         m_mixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 2)) { ReadFully = true };
-        m_output = new WaveOutEvent { DesiredLatency = 120 };
-        m_output.Init(m_mixer);
-        m_output.Play();
+        m_output = output;
+        m_output.Start(m_mixer);
     }
 
     private float VolumeOf(string channel) =>
@@ -102,7 +108,6 @@ public sealed class AudioEngine : IDisposable
 
     public void Dispose()
     {
-        m_output.Stop();
         m_output.Dispose();
         lock (m_lock)
         {

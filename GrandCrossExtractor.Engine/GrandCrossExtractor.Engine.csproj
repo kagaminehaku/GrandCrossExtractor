@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The engine without a user interface: archives, decoders, the story interpreter, the
+       effect formulas and the audio mixer. No WPF or Windows API, so other front ends
+       (another platform) can use it; the WPF app supplies the screen, sound output and pages. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GrandCrossExtractor</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Product>GrandCross Extractor</Product>
+    <Description>Archives, decoders and story engine of Grand Cross (ShiinaRio engine) visual novels.</Description>
+    <Version>1.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>kagaminehaku</Authors>
+    <Copyright>Copyright (c) 2026 kagaminehaku. Portions Copyright (c) 2014-2020 morkt (GARbro).</Copyright>
+    <RepositoryUrl>https://github.com/kagaminehaku/GrandCrossExtractor</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NVorbis" Version="0.10.5" />
+    <!-- The mixer only; the WPF app plays it with NAudio.WinMM -->
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+  </ItemGroup>
+
+</Project>

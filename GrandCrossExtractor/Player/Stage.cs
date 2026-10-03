@@ -1,11 +1,11 @@
-// The engine's 800x600 screen: numbered picture planes (0 = background), a scrolling
-// background, a movie, transitions, plane animations and screen effects.
+// The engine's 800x600 screen (IStage) drawn with WPF: numbered picture planes (0 =
+// background), a scrolling background, a movie, transitions, plane animations and screen effects.
 //
 // Drawing commands change the planes at once, but the screen keeps showing the previous
 // picture (a snapshot laid over it) until $DRAW / $DRAW_EX shows the change. Plane animations
 // ($A_CHR, and the cross-fade of $L_CHR) are queued and start with that $DRAW, as the engine's
-// action queue does. The timings and formulas follow START.SCN and EFCLIB.SCN; see
-// docs/engine-notes.md, section 8.
+// action queue does. The timings follow START.SCN and EFCLIB.SCN and the formulas are the
+// engine library's StageMath; see docs/engine-notes.md, section 8.
 
 using System.Diagnostics;
 using System.Windows;
@@ -13,23 +13,16 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using GrandCrossExtractor.Formats;
+using GrandCrossExtractor.UI;
 
 namespace GrandCrossExtractor.Player;
 
-/// <summary>How $DRAW_EX replaces the screen.</summary>
-public enum Transition
+public sealed class Stage : IStage
 {
-    Cut,
-    CrossFade,
-    /// <summary>Rule wipe, bright parts of the rule mask first ($DRAW_EX kind 2).</summary>
-    RuleBrightFirst,
-    /// <summary>Rule wipe, dark parts first ($DRAW_EX kind 47).</summary>
-    RuleDarkFirst,
-}
+    public const int Width = StageSize.Width, Height = StageSize.Height;
 
-public sealed class Stage
-{
-    public const int Width = 800, Height = 600;
+    private readonly Canvas m_root;
 
     private readonly Canvas m_effect = new() { Width = Width, Height = Height };
     private readonly Canvas m_content = new() { Width = Width, Height = Height, Background = Brushes.Black };
@@ -58,6 +51,7 @@ public sealed class Stage
 
     public Stage(Canvas root)
     {
+        m_root = root;
         root.Width = Width;
         root.Height = Height;
         root.ClipToBounds = true;
@@ -68,14 +62,6 @@ public sealed class Stage
         m_effect.Children.Add(m_negative);
         RenderOptions.SetBitmapScalingMode(m_content, BitmapScalingMode.HighQuality);
     }
-
-    /// <summary>The engine's three easing curves: 1 linear, 2 slow start (1-cos), 3 slow end (sin).</summary>
-    private static double Ease(int type, double t) => type switch
-    {
-        2 => 1 - Math.Cos(Math.PI * t / 2),
-        3 => Math.Sin(Math.PI * t / 2),
-        _ => t,
-    };
 
     #region Planes
 
@@ -155,9 +141,10 @@ public sealed class Stage
         plane.X = x;
         plane.Y = y;
         plane.Source = plane.Target = new Rect(0, 0, Width, Height);
-        plane.Element.Source = picture.Bitmap;
-        plane.Element.Width = picture.Bitmap.PixelWidth;
-        plane.Element.Height = picture.Bitmap.PixelHeight;
+        var bitmap = picture.Image.ToBitmapSource();
+        plane.Element.Source = bitmap;
+        plane.Element.Width = bitmap.PixelWidth;
+        plane.Element.Height = bitmap.PixelHeight;
         plane.Element.Opacity = 1;
         plane.Element.OpacityMask = null;
         plane.Update();
@@ -176,9 +163,10 @@ public sealed class Stage
         plane.Picture = picture;
         plane.X = x;
         plane.Y = y;
-        plane.Element.Source = picture.Bitmap;
-        plane.Element.Width = picture.Bitmap.PixelWidth;
-        plane.Element.Height = picture.Bitmap.PixelHeight;
+        var bitmap = picture.Image.ToBitmapSource();
+        plane.Element.Source = bitmap;
+        plane.Element.Width = bitmap.PixelWidth;
+        plane.Element.Height = bitmap.PixelHeight;
         plane.Update();
     }
 
@@ -404,7 +392,7 @@ public sealed class Stage
         double x0 = 0, y0 = 0;
         var anim = Queue(number, "move", ms, background, t =>
         {
-            double s = Ease(easing, t);
+            double s = StageMath.Ease(easing, t);
             plane.X = x0 + (x - x0) * s;
             plane.Y = y0 + (y - y0) * s;
             plane.Update();
@@ -421,35 +409,37 @@ public sealed class Stage
             anim.Finished = () => RemovePlane(number);
     }
 
+    private static Rect ToRect(StageRect r) => new(r.X, r.Y, r.Width, r.Height);
+
     /// <summary>Sets the part of the screen a plane is drawn into (A_CHR 40).</summary>
-    public void SetViewTarget(int number, Rect target)
+    public void SetViewTarget(int number, StageRect target)
     {
         if (!m_planes.TryGetValue(number, out var plane))
             return;
         Freeze();
-        plane.Target = target;
+        plane.Target = ToRect(target);
         plane.Update();
     }
 
     /// <summary>Sets the part of the plane that is shown, zoomed to the target (A_CHR 41).</summary>
-    public void SetViewSource(int number, Rect source)
+    public void SetViewSource(int number, StageRect source)
     {
         if (!m_planes.TryGetValue(number, out var plane))
             return;
         Freeze();
-        plane.Source = source;
+        plane.Source = ToRect(source);
         plane.Update();
     }
 
     /// <summary>Pans / zooms the shown part to <paramref name="source"/> (A_CHR 42-44: easing 1-3).</summary>
-    public void QueueView(int number, Rect source, int easing, double ms, bool background)
+    public void QueueView(int number, StageRect target, int easing, double ms, bool background)
     {
         if (!m_planes.TryGetValue(number, out var plane))
             return;
-        Rect from = default;
+        Rect from = default, source = ToRect(target);
         var anim = Queue(number, "view", ms, background, t =>
         {
-            double s = Ease(easing, t);
+            double s = StageMath.Ease(easing, t);
             plane.Source = new Rect(from.X + (source.X - from.X) * s, from.Y + (source.Y - from.Y) * s,
                                     from.Width + (source.Width - from.Width) * s, from.Height + (source.Height - from.Height) * s);
             plane.Update();
@@ -477,7 +467,6 @@ public sealed class Stage
         anim.Step = ms =>
         {
             int n = (int)(ms / period);
-            double ph = ms % period, a = amplitude;
             if (plane.StopLoopAtCycleEnd && stopAt < 0)
                 stopAt = n;
             if ((cycles > 0 && n >= cycles) || (stopAt >= 0 && n != stopAt))
@@ -487,19 +476,7 @@ public sealed class Stage
                 lastCycle = n;
                 plane.OnCycle?.Invoke();
             }
-            double dx = 0, dy = 0, k = a * ph * 2 / period;
-            double tri = ph < period / 4 ? -k : ph < period * 3 / 4 ? k - a : -(k - a * 2);
-            switch (mode)
-            {
-                case 1: dy = -Math.Sin(Math.PI * ph / period) * a; break;
-                case 2: dy = Math.Sin(Math.PI * ph / period) * a; break;
-                case 3: dy = tri; break;
-                case 4: dx = tri; break;
-                case 5: dy = -Math.Sin(2 * Math.PI * ph / period) * a / 2; break;
-                case 6: dx = Math.Sin(2 * Math.PI * ph / period) * a / 2; break;
-            }
-            plane.LoopX = dx;
-            plane.LoopY = dy;
+            (plane.LoopX, plane.LoopY) = StageMath.LoopOffset(mode, ms % period, period, amplitude);
             plane.Update();
             return false;
         };
@@ -540,30 +517,20 @@ public sealed class Stage
     /// bright rule pixels showing first and vanishing last; <paramref name="reversed"/> swaps the
     /// mask's bright and dark parts.
     /// </summary>
-    public void QueueRuleFade(int number, BitmapSource rule, bool appear, bool reversed, double ms, bool background)
+    public void QueueRuleFade(int number, PixelImage rule, bool appear, bool reversed, double ms, bool background)
     {
         if (!m_planes.TryGetValue(number, out var plane))
             return;
         Freeze();
-        var levels = RuleLevels(rule);
+        var levels = RuleLevels(rule.ToBitmapSource());
         var mask = new WriteableBitmap(Width, Height, 96, 96, PixelFormats.Pbgra32, null);
         var pixels = new byte[Width * Height * 4];
+        var weights = new byte[256];
         void Paint(double t)
         {
-            // START.SCN 13E8D: trs runs 511 -> 0 to appear, 0 -> 511 to vanish (0 = all shown).
-            // The MMX blend at 796E5 keeps rule values >= imax, ramps (imin, imax), drops the rest:
-            // trs < 256: imin 0, imax trs; else imin trs - 256, imax 255
-            int trs = (int)(511 * t);
-            if (appear)
-                trs = 511 - trs;
-            int imin = trs < 256 ? 0 : trs - 256, imax = trs < 256 ? trs : 255;
-            int step = 0x8080 / (imax - imin + 1), bias = imin == 0 ? 0 : imin - 1;
+            StageMath.RuleFadeLevels(t, appear, reversed, weights);
             for (int i = 0, p = 0; i < levels.Length; i++, p += 4)
-            {
-                int m = reversed ? 255 - levels[i] : levels[i];
-                int w = trs == 0 || m >= imax ? 255 : m > imin ? (m - bias) * step * 255 >> 15 : 0;
-                pixels[p] = pixels[p + 1] = pixels[p + 2] = pixels[p + 3] = (byte)w;
-            }
+                pixels[p] = pixels[p + 1] = pixels[p + 2] = pixels[p + 3] = weights[levels[i]];
             mask.WritePixels(new Int32Rect(0, 0, Width, Height), pixels, Width * 4, 0);
         }
         // The mask is in screen coordinates; the plane's own transform is undone for the brush
@@ -643,7 +610,7 @@ public sealed class Stage
     /// over <paramref name="ms"/>) and starts the queued animations. The task completes when
     /// the transition has ended; the engine waits for it.
     /// </summary>
-    public Task DrawEx(Transition kind, double ms, BitmapSource? rule) => Commit(kind, ms, rule, keepPlaneFades: false);
+    public Task DrawEx(Transition kind, double ms, PixelImage? rule) => Commit(kind, ms, rule?.ToBitmapSource(), keepPlaneFades: false);
 
     private Task Commit(Transition kind, double ms, BitmapSource? rule, bool keepPlaneFades)
     {
@@ -691,30 +658,24 @@ public sealed class Stage
     }
 
     /// <summary>
-    /// Rule wipe as the engine's blend (exe 0x437B40): with t going 0..511, the new picture's
-    /// weight at a pixel is clamp(t + rule - 256, 0, 256) / 256, so bright parts of the rule
-    /// change first. Dark-first ($DRAW_EX 47) runs the same blend with the pictures swapped
-    /// and t going back.
+    /// Rule wipe as the engine's blend (StageMath.RuleWipeLevels): the overlay holds the old
+    /// picture, and its opacity at a pixel follows the rule mask there.
     /// </summary>
     private Anim RuleTransition(double ms, BitmapSource rule, bool brightFirst)
     {
         var levels = RuleLevels(rule);
         var mask = new WriteableBitmap(Width, Height, 96, 96, PixelFormats.Pbgra32, null);
         var pixels = new byte[Width * Height * 4];
+        var weights = new byte[256];
         m_overlay.OpacityMask = new ImageBrush(mask);
         return new Anim
         {
             Duration = ms, Kind = "transition",
             Apply = p =>
             {
-                double t = 511 * (brightFirst ? p : 1 - p);
+                StageMath.RuleWipeLevels(p, brightFirst, weights);
                 for (int i = 0, k = 0; i < levels.Length; i++, k += 4)
-                {
-                    double w = Math.Clamp(t + levels[i] - 256, 0, 256) / 256;
-                    // The overlay holds the old picture
-                    double old = brightFirst ? 1 - w : w;
-                    pixels[k] = pixels[k + 1] = pixels[k + 2] = pixels[k + 3] = (byte)(old * 255);
-                }
+                    pixels[k] = pixels[k + 1] = pixels[k + 2] = pixels[k + 3] = weights[levels[i]];
                 mask.WritePixels(new Int32Rect(0, 0, Width, Height), pixels, Width * 4, 0);
             },
         };
@@ -739,19 +700,18 @@ public sealed class Stage
 
     #region Screen effects ($EFECT, EFCLIB.SCN)
 
-    private const double EffectFrameMs = 1000.0 / 15;   // EFCLIB runs these effects at 15 fps
-
     /// <summary>
     /// Shows a sequence of frames (one screen transform each) at 15 fps, then puts the screen
     /// back. The task completes at the end; a click ends it early.
     /// </summary>
-    private Task EffectFrames(IReadOnlyList<Matrix> frames)
+    private Task EffectFrames(IReadOnlyList<StageTransform> transforms)
     {
+        var frames = transforms.Select(f => new Matrix(f.ScaleX, 0, 0, f.ScaleY, f.OffsetX, f.OffsetY)).ToList();
         var transform = new MatrixTransform();
         var anim = new Anim
         {
             Kind = "effect",
-            Duration = frames.Count * EffectFrameMs,
+            Duration = frames.Count * StageMath.EffectFrameMs,
             Apply = t => transform.Matrix = frames[Math.Min(frames.Count - 1, (int)(t * frames.Count))],
         };
         anim.Started = () => m_effect.RenderTransform = transform;
@@ -760,42 +720,12 @@ public sealed class Stage
         return anim.Done.Task;
     }
 
-    /// <summary>
-    /// EFCLIB 34 ($EFECT 0 / 1 / 2): the screen, enlarged by <paramref name="size"/> pixels,
-    /// jumps between four offsets, twice.
-    /// </summary>
-    public Task Shake(int size)
-    {
-        double sx = (Width + size) / (double)Width, sy = (Height + size) / (double)Height;
-        var offsets = new (double X, double Y)[] { (0, -size), (-size / 2.0, -size / 2.0), (-size, -size), (-size / 2.0, -size / 2.0) };
-        var frames = new List<Matrix>();
-        for (int round = 0; round < 2; round++)
-            foreach (var (x, y) in offsets)
-                frames.Add(new Matrix(sx, 0, 0, sy, x, y));
-        return EffectFrames(frames);
-    }
+    public Task Shake(int size) => EffectFrames(StageMath.ShakeFrames(size));
 
-    /// <summary>
-    /// EFCLIB 35 ($EFECT 8-15): zooms in by (w, h) pixels a side per step, steps 1, 2, 3, 2, 1,
-    /// <paramref name="rounds"/> times.
-    /// </summary>
-    public Task ZoomPulse(int w, int h, int rounds)
-    {
-        var frames = new List<Matrix>();
-        for (int round = 0; round < rounds; round++)
-        {
-            foreach (int z in new[] { 1, 2, 3, 2, 1 })
-            {
-                double tx = w * z, ty = h * z;
-                double sx = Width / (Width - 2 * tx), sy = Height / (Height - 2 * ty);
-                frames.Add(new Matrix(sx, 0, 0, sy, -tx * sx, -ty * sy));
-            }
-        }
-        return EffectFrames(frames);
-    }
+    public Task ZoomPulse(int w, int h, int rounds) => EffectFrames(StageMath.ZoomPulseFrames(w, h, rounds));
 
-    /// <summary>A flash of <paramref name="color"/> held for <paramref name="ms"/> ($EFECT 3-6).</summary>
-    public Task Flash(Color color, double ms, bool fade)
+    /// <summary>A flash of <paramref name="color"/> held for <paramref name="ms"/> ($EFECT 4 / 5).</summary>
+    public Task Flash(StageColor color, double ms, bool fade)
     {
         var anim = new Anim
         {
@@ -805,7 +735,7 @@ public sealed class Stage
         };
         anim.Started = () =>
         {
-            m_flash.Fill = new SolidColorBrush(color);
+            m_flash.Fill = new SolidColorBrush(Color.FromRgb(color.R, color.G, color.B));
             m_flash.Opacity = 1;
         };
         anim.Finished = () => m_flash.Opacity = 0;
@@ -865,14 +795,15 @@ public sealed class Stage
     /// <summary>Sets the scrolling picture; it is drawn twice side by side so it wraps ($EX,9,1,slot,file).</summary>
     public void ScrollImage(StageImage picture)
     {
+        var bitmap = picture.Image.ToBitmapSource();
         if (m_scroll == null)
-            ScrollInit(picture.Bitmap.PixelWidth);
+            ScrollInit(bitmap.PixelWidth);
         Freeze();
         m_scroll!.Children.Clear();
         if (m_scrollWidth <= 0)
-            m_scrollWidth = picture.Bitmap.PixelWidth;
+            m_scrollWidth = bitmap.PixelWidth;
         for (int i = 0; i < 2; i++)
-            m_scroll.Children.Add(new Image { Source = picture.Bitmap, Width = picture.Bitmap.PixelWidth, Height = picture.Bitmap.PixelHeight, Stretch = Stretch.Fill });
+            m_scroll.Children.Add(new Image { Source = bitmap, Width = bitmap.PixelWidth, Height = bitmap.PixelHeight, Stretch = Stretch.Fill });
         ScrollPosition(0);
     }
 
@@ -998,6 +929,15 @@ public sealed class Stage
     }
 
     #endregion
+
+    /// <summary>What the screen shows now, scaled to <paramref name="width"/> x <paramref name="height"/> (BGRA).</summary>
+    public PixelImage Snapshot(int width, int height)
+    {
+        var full = new RenderTargetBitmap(Width, Height, 96, 96, PixelFormats.Pbgra32);
+        full.Render(m_root);
+        var small = new TransformedBitmap(full, new ScaleTransform((double)width / Width, (double)height / Height));
+        return new WriteableBitmap(small).ToPixelImage();
+    }
 
     /// <summary>Clears everything (a new chapter starts).</summary>
     public void Reset()

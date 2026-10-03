@@ -2,8 +2,6 @@
 // Ported from GARbro ArcFormats/ShiinaRio/ImageMI4.cs
 
 using System.IO;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using GrandCrossExtractor.Core;
 
 namespace GrandCrossExtractor.Formats;
@@ -15,7 +13,8 @@ public class Mi4Decoder
         return data.Length >= 16 && data[0] == 'M' && data[1] == 'A' && data[2] == 'I' && data[3] == '4';
     }
 
-    public static BitmapSource? Decode(byte[] data)
+    /// <summary>The picture as BGR pixels, or null when the data is not MI4.</summary>
+    public static PixelImage? Decode(byte[] data)
     {
         if (!IsMi4(data)) return null;
 
@@ -36,15 +35,7 @@ public class Mi4Decoder
             reader.Unpack(MaiVersion.First);
         }
 
-        var bitmap = BitmapSource.Create(
-            (int)width, (int)height,
-            96, 96,
-            PixelFormats.Bgr24,
-            null,
-            reader.Data,
-            reader.Stride);
-        bitmap.Freeze();
-        return bitmap;
+        return new PixelImage((int)width, (int)height, PixelLayout.Bgr24, reader.Data);
     }
 
     internal enum MaiVersion

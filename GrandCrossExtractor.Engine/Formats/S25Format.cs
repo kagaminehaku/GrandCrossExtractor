@@ -2,8 +2,6 @@
 // Ported from GARbro ArcFormats/ShiinaRio/ImageS25.cs
 
 using System.IO;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using GrandCrossExtractor.Core;
 
 namespace GrandCrossExtractor.Formats;
@@ -17,9 +15,10 @@ public class S25Frame
     public uint Height { get; set; }
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
-    public BitmapSource Image { get; set; } = null!;
+    /// <summary>The decoded frame, BGRA with straight alpha.</summary>
+    public PixelImage Image { get; set; } = null!;
     /// <summary>Decoded BGRA pixels (straight alpha), Width * Height * 4 bytes.</summary>
-    public byte[] Pixels { get; set; } = null!;
+    public byte[] Pixels => Image.Pixels;
 }
 
 /// <summary>Frame header without pixel data: enough to work out the layer layout cheaply.</summary>
@@ -74,15 +73,6 @@ public class S25Decoder
             var reader = new S25Reader(stream, info.Width, info.Height, info.Offset + 0x14, incremental);
             byte[] pixels = reader.Unpack();
 
-            var bitmap = BitmapSource.Create(
-                (int)info.Width, (int)info.Height,
-                96, 96,
-                PixelFormats.Bgra32,
-                null,
-                pixels,
-                (int)info.Width * 4);
-            bitmap.Freeze();
-
             frames.Add(new S25Frame
             {
                 Index = info.Index,
@@ -91,15 +81,14 @@ public class S25Decoder
                 Height = info.Height,
                 OffsetX = info.OffsetX,
                 OffsetY = info.OffsetY,
-                Image = bitmap,
-                Pixels = pixels
+                Image = new PixelImage((int)info.Width, (int)info.Height, PixelLayout.Bgra32, pixels),
             });
         }
 
         return frames;
     }
 
-    public static BitmapSource? DecodeFirstFrame(byte[] data)
+    public static PixelImage? DecodeFirstFrame(byte[] data)
     {
         var frames = DecodeAllFrames(data);
         return frames.Count > 0 ? frames[0].Image : null;

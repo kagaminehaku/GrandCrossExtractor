@@ -163,20 +163,31 @@ data), START 54 %, TOPMENU 56 % - START and TOPMENU still have unhandled special
 
 ## 6. Play Story - status
 
-`GrandCrossExtractor/Player/` plays Oreimo Plus from beginning to end (all 35 files, every
-choice), reading the archives of the game folder:
+Play Story plays Oreimo Plus from beginning to end (all 35 files, every choice), reading the
+archives of the game folder. It is split in two projects:
+
+- `GrandCrossExtractor.Engine` (`net10.0`, no WPF or Windows API): archives, decoders, the
+  story engine and its formulas. Pictures are `PixelImage` (plain BGRA / BGR pixels), sound
+  goes out through `IAudioOutput`, and the screen and the window around it are the interfaces
+  `IStage` and `IStoryView`, so another front end (another platform) can reuse all of it.
+- `GrandCrossExtractor` (WPF): the extractor window and the player's screens.
 
 | File | Role |
 |---|---|
-| `ScnMachine.cs` | interpreter for SRC_MAIN.SCN (the story order of any game): variables, expressions, jumps, switch / case, local calls; gosub 240 and callmod 203 go to the player |
-| `StoryFlow.cs` | the chapter list (hand-written for Oreimo; the story itself runs from SRC_MAIN) |
-| `ScenarioScript.cs` | TXT parser |
-| `GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
-| `Stage.cs` | 800x600 planes, snapshot-based DRAW / DRAW_EX (cross-fade, rule wipe), plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
-| `AudioEngine.cs` | NAudio mixer: BGM, voice, SE channels, loops, fades |
-| `MessageText.cs` | message text with the engine's font metrics, kinsoku and gaiji |
-| `PlayerWindow.*` | title screen, message window and its button bar, choices, auto / skip, chapter list (`.Script` interpreter, `.Save` save / load pages and auto save, `.Option` OPTION page, backlog page, settings, `.Dialog` YES / NO dialog) |
-| `SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` (`GCX_PLAYER_DATA` points them elsewhere, for tests) |
+| Engine `Player/StoryPlayer.cs` | the story engine: flow, scenario command interpreter, auto / skip / Ctrl, backlog, settings, saves and auto saves, save thumbnails, title sequence |
+| Engine `Player/ScnMachine.cs` | interpreter for SRC_MAIN.SCN (the story order of any game): variables, expressions, jumps, switch / case, local calls; gosub 240 and callmod 203 go to StoryPlayer |
+| Engine `Player/StoryFlow.cs` | the chapter list (hand-written for Oreimo; the story itself runs from SRC_MAIN) |
+| Engine `Player/ScenarioScript.cs` | TXT parser |
+| Engine `Player/GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
+| Engine `Player/IStage.cs` | what the screen must do: planes, the action queue, DRAW / DRAW_EX, effects, scroll, movie |
+| Engine `Player/StageMath.cs` | the formulas of section 8: easings, A_CHR loops, rule fade / rule wipe levels, EFCLIB shake and zoom frames |
+| Engine `Player/MessageLayout.cs` | message text layout with the engine's font metrics and kinsoku |
+| Engine `Player/AudioEngine.cs` | NAudio mixer (NAudio.Core): BGM, voice, SE channels, loops, fades |
+| Engine `Player/SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` (`GCX_PLAYER_DATA` points them elsewhere, for tests) |
+| WPF `Player/Stage.cs` | `IStage` with WPF: 800x600 planes, snapshot-based DRAW / DRAW_EX, plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
+| WPF `Player/MessageText.cs` | draws the message text and gaiji at `MessageLayout`'s positions |
+| WPF `Player/WaveOutput.cs` | `IAudioOutput` on the Windows sound device (NAudio.WinMM) |
+| WPF `Player/PlayerWindow.*` | `IStoryView`: title buttons, message window and its button bar, choices, chapter list, input (`.Save` save / load pages, `.Option` OPTION page and backlog page, `.Dialog` YES / NO dialog) |
 
 Command behaviour and the screens follow section 8. Not done: ruby, the engine's own lip sync /
 blinking, other games' flows (each needs its SRC_MAIN read).

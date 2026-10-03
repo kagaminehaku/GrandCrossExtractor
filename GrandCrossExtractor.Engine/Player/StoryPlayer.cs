@@ -1,15 +1,240 @@
-// Story player: runs the game flow and the scenario commands. Command meanings come from
-// START.SCN and EFCLIB.SCN; see docs/engine-notes.md, section 8.
+// The story engine: runs a game's flow (SRC_MAIN.SCN, or a StoryFlow) and its scenario commands
+// on an IStage, with the sound, the auto / skip modes, the backlog, settings and saves. The front
+// end shows the message window and the choices (IStoryView) and passes the clicks on. Command
+// meanings come from START.SCN and EFCLIB.SCN; see docs/engine-notes.md, section 8.
 
 using System.Text.RegularExpressions;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using GrandCrossExtractor.Formats;
 
 namespace GrandCrossExtractor.Player;
 
-public partial class PlayerWindow : ScnMachine.IHost
+/// <summary>What the story needs from the window around the screen.</summary>
+public interface IStoryView
 {
+    void ShowMessageWindow();
+
+    void HideMessageWindow();
+
+    /// <summary>The speaker's name plate (NWINTBL.BIN) or name; null for none.</summary>
+    void SetSpeaker(string? speaker);
+
+    /// <summary>Shows the first <paramref name="shown"/> characters; the rest keeps its place, invisible (MessageLayout).</summary>
+    void SetMessageText(string text, int shown);
+
+    /// <summary>The icon that waits for a click after a message.</summary>
+    void ShowClickWait(bool visible);
+
+    /// <summary>Auto or skip was turned on or off.</summary>
+    void ModesChanged();
+
+    /// <summary>
+    /// Shows a choice and returns the option picked, laid out as function 203 of START.SCN does.
+    /// With <paramref name="imageSlot"/> &gt;= 0 the options are the game's picture buttons
+    /// (SYSTEM.S25 slot + 10 per option); options whose bit is set in <paramref name="played"/>
+    /// are dimmed and cannot be chosen.
+    /// </summary>
+    Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot, int played);
+}
+
+/// <summary>A message of the backlog.</summary>
+public sealed record LogEntry(string Speaker, string Text, string? Voice);
+
+public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
+{
+    private readonly GameData m_data;
+    private readonly StoryFlow m_flow;
+    private readonly IStage m_stage;
+    private readonly IStoryView m_view;
+    private readonly AudioEngine m_audio;
+
+    public StoryPlayer(GameData data, StoryFlow flow, IStage stage, IStoryView view, AudioEngine audio)
+    {
+        m_data = data;
+        m_flow = flow;
+        m_stage = stage;
+        m_view = view;
+        m_audio = audio;
+    }
+
+    public GameData Data => m_data;
+    public StoryFlow Flow => m_flow;
+    public AudioEngine Audio => m_audio;
+
+    // The token of the run that this code belongs to. It flows with the async calls, so a run that
+    // was replaced keeps its own cancelled token and stops instead of taking on the new one.
+    private readonly AsyncLocal<CancellationToken> m_runToken = new();
+
+    public CancellationToken Token
+    {
+        get => m_runToken.Value;
+        set => m_runToken.Value = value;
+    }
+
+    private CancellationToken m_token => Token;
+
+    /// <summary>Releases the sound and the archives, and keeps the record of messages read.</summary>
+    public void Dispose()
+    {
+        if (m_read != null)
+            PlayerConfig.SaveRead(m_data.SchemeName, m_read);
+        m_audio.Dispose();
+        m_data.Dispose();
+    }
+
+    #region Modes and input
+
+    private bool m_auto;
+    private bool m_skip;
+    private bool m_ctrlHeld;
+
+    public bool Auto => m_auto;
+    public bool Skip => m_skip;
+
+    /// <summary>Skip mode, Ctrl held, or loading a save (which passes the messages before the saved one like skipping does).</summary>
+    public bool Skipping => m_skip || m_ctrlHeld || m_restoreTo >= 0;
+
+    // A click (or Enter, Space, ...) the script is waiting for
+    private TaskCompletionSource? m_click;
+
+    // Wakes a message that waits in auto mode when the mode changes
+    private TaskCompletionSource? m_modeChanged;
+
+    /// <summary>
+    /// Starts a run (the story, or the title screen) with its own token: auto and skip off, and
+    /// with <paramref name="restoreTo"/> &gt;= 0 the messages before that one passed silently
+    /// (counted by script line with <paramref name="byLine"/>), to come back to a save.
+    /// </summary>
+    public void BeginRun(CancellationToken token, int restoreTo = -1, bool byLine = false)
+    {
+        Token = token;
+        m_restoreTo = restoreTo;
+        m_restoreByLine = byLine;
+        m_skip = m_auto = false;
+        m_view.ModesChanged();
+    }
+
+    /// <summary>A click for the story: ends animations, shows the whole message, or goes on.</summary>
+    public void Click() => m_click?.TrySetResult();
+
+    public Task NextClick()
+    {
+        if (m_click == null || m_click.Task.IsCompleted)
+            m_click = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        return m_click.Task;
+    }
+
+    public void ToggleAuto()
+    {
+        m_auto = !m_auto;
+        if (m_auto)
+            m_skip = false;
+        m_view.ModesChanged();
+        m_modeChanged?.TrySetResult();
+    }
+
+    public void ToggleSkip()
+    {
+        m_skip = !m_skip;
+        if (m_skip)
+        {
+            m_auto = false;
+            m_stage.FinishAll();
+            m_click?.TrySetResult();
+        }
+        m_view.ModesChanged();
+    }
+
+    /// <summary>Holding Ctrl skips while it is held.</summary>
+    public void SetCtrlHeld(bool held)
+    {
+        if (!held)
+        {
+            m_ctrlHeld = false;
+            m_view.ModesChanged();
+            return;
+        }
+        if (m_ctrlHeld)
+            return;
+        m_ctrlHeld = true;
+        m_view.ModesChanged();
+        m_stage.FinishAll();
+        m_click?.TrySetResult();
+    }
+
+    #endregion
+
+    #region Settings, read messages and backlog
+
+    private PlayerConfig? m_config;
+    public PlayerConfig Config => m_config ??= PlayerConfig.Load(m_data.SchemeName);
+
+    private HashSet<string>? m_read;
+    private HashSet<string> Read => m_read ??= PlayerConfig.LoadRead(m_data.SchemeName);
+
+    public void SaveConfig() => Config.Save(m_data.SchemeName);
+
+    /// <summary>Volumes from the settings.</summary>
+    public void ApplyAudioConfig()
+    {
+        m_audio.MusicVolume = Config.MusicOn ? (float)Config.MusicVolume : 0;
+        m_audio.VoiceVolume = Config.VoiceOn ? (float)Config.VoiceVolume : 0;
+        m_audio.EffectVolume = Config.EffectOn ? (float)Config.EffectVolume : 0;
+        m_audio.UpdateVolumes();
+    }
+
+    /// <summary>Marks a message as read; returns whether it had been read before.</summary>
+    private bool MarkRead(string file, int index) => !Read.Add($"{file}:{index}");
+
+    private readonly List<LogEntry> m_log = new();
+    private const int LogLimit = 2000;
+
+    /// <summary>The messages shown so far, oldest first (the last 2000).</summary>
+    public IReadOnlyList<LogEntry> Log => m_log;
+
+    private void AddLog(string speaker, string text, string? voice)
+    {
+        m_log.Add(new LogEntry(speaker, text, voice));
+        if (m_log.Count > LogLimit)
+            m_log.RemoveRange(0, m_log.Count - LogLimit);
+    }
+
+    #endregion
+
+    #region Title screen
+
+    /// <summary>
+    /// TOPMENU.SCN: with <paramref name="opening"/> the title call (d\CMA002), the Grand Cross
+    /// logo (1 s fade, 3 s), white, the caution screen (until a click), white; then the title
+    /// picture with the theme. Returns TITLE.S25's frames by slot, for the title buttons.
+    /// </summary>
+    public async Task<Dictionary<int, S25Frame>> PlayTitleAsync(bool opening)
+    {
+        if (opening)
+        {
+            if (m_data.ReadAudio(@"d\CMA002.ogv") is { } call)
+                m_audio.Play(AudioEngine.Voice, call, 1);
+            foreach (var (file, fade, hold) in new[] { (@"d\logo_gc.s25", 1000, 3000), (@"d\white.s25", 400, 0), (@"d\caution.s25", 600, -1), (@"d\white.s25", 400, 0) })
+            {
+                m_stage.SetPlane(0, await LoadImageAsync(file));
+                await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, fade, null));
+                if (hold > 0)
+                    await WaitSkippableAsync(Task.Delay(hold, m_token));
+                else if (hold < 0)
+                    await NextClick().WaitAsync(m_token);
+            }
+        }
+        var frames = (m_data.LoadFrames("TITLE.S25") ?? new()).ToDictionary(f => f.Slot);
+        if (frames.TryGetValue(0, out var background))
+            m_stage.SetPlane(0, new StageImage(background.Image, background.OffsetX, background.OffsetY));
+        await WaitSkippableAsync(m_stage.DrawEx(Transition.CrossFade, 400, null));
+        if (await Task.Run(() => m_data.ReadAudio(@"m\oreplus_01.ogv")) is { } theme)
+            m_audio.Play(AudioEngine.Music, theme, 0);
+        m_token.ThrowIfCancellationRequested();
+        return frames;
+    }
+
+    #endregion
+
     // Variables of a run without a flow script (_D710 ...); with one they are its a[]
     private readonly Dictionary<int, int> m_vars = new();
 
@@ -53,7 +278,7 @@ public partial class PlayerWindow : ScnMachine.IHost
     /// Plays the story: SRC_MAIN.SCN when the game has it, from the beginning, from a scenario
     /// file (its scene number and route), or from the variables of a save.
     /// </summary>
-    private async Task RunFlowAsync(string? startFile, int initialPlayed = 0, IReadOnlyDictionary<string, int>? vars = null)
+    public async Task RunAsync(string? startFile, int initialPlayed = 0, IReadOnlyDictionary<string, int>? vars = null)
     {
         if (!m_flowCodeRead)
         {
@@ -216,6 +441,97 @@ public partial class PlayerWindow : ScnMachine.IHost
         await ExecuteAsync(script);
     }
 
+    /// <summary>
+    /// Asks a question (see IStoryView.ChooseAsync): skipping stops, the message window goes,
+    /// animations end; the answer goes to the backlog.
+    /// </summary>
+    private async Task<int> ChooseAsync(IReadOnlyList<string> options, int imageSlot = -1, int played = 0)
+    {
+        m_skip = false;
+        m_view.ModesChanged();
+        m_view.HideMessageWindow();
+        m_stage.FinishAll();
+        int result = await m_view.ChooseAsync(options, imageSlot, played);
+        AddLog("", $"⇒ {options[result]}", null);
+        return result;
+    }
+
+    #endregion
+
+    #region Saves
+
+    private SaveStore? m_saves;
+    public SaveStore Saves => m_saves ??= new SaveStore(m_data.SchemeName);
+
+    /// <summary>True once the story has reached a scenario file, so there is a place to save.</summary>
+    public bool HasPosition => m_file.Length > 0;
+
+    /// <summary>A save of the message on screen.</summary>
+    public SaveData CurrentSave() => NewSave(Math.Max(0, m_messageIndex - 1), m_lastText);
+
+    /// <summary>Where the story is now, with the flow script's variables.</summary>
+    private SaveData NewSave(int message, string text) =>
+        new(m_file, message, m_machine?.GetA(PlayedVar) ?? m_played, text, DateTime.Now) { Vars = m_machine?.Snapshot(), Line = m_messageLine };
+
+    /// <summary>Auto save at the first message of a scenario file (START.SCN function 197).</summary>
+    private void AutoSave(int message, string text)
+    {
+        try
+        {
+            Saves.WriteAuto(NewSave(message, text), SaveThumbnail());
+        }
+        catch
+        {
+            // The story goes on without the auto save
+        }
+    }
+
+    public const int ThumbnailWidth = 100, ThumbnailHeight = 75;
+
+    /// <summary>
+    /// The thumbnail the game stores with a save (START.SCN 2CBF4): the fixed THSAVE.S25 picture
+    /// of the topmost plane that shows an event CG of its list (on plane 0 a playing movie counts
+    /// instead), with the overlay pictures of that plane and the planes above drawn at their
+    /// positions; a scaled screenshot when no plane has one.
+    /// </summary>
+    public PixelImage SaveThumbnail()
+    {
+        var tables = m_data.GetThumbnailTables();
+        var frames = tables == null ? null : m_data.LoadFrames("d\\thsave.s25")?.ToDictionary(f => f.Slot);
+        if (tables == null || frames == null)
+            return m_stage.Snapshot(ThumbnailWidth, ThumbnailHeight);
+
+        var planes = m_stage.PictureNames().Where(p => p.Number is >= 0 and <= 9).OrderByDescending(p => p.Number).ToList();
+        S25Frame? picture = null;
+        int found = -1;
+        foreach (var plane in planes)
+        {
+            int index;
+            if (plane.Number == 0 && m_stage.MovieName is { } movie)
+                index = Array.IndexOf(tables.Movies, movie) is var m and >= 0 ? 3000 + m : -1;
+            else
+                index = Array.IndexOf(tables.Pictures, plane.Name);
+            if (index >= 0 && frames.TryGetValue(index, out picture))
+            {
+                found = plane.Number;
+                break;
+            }
+        }
+        if (picture == null)
+            return m_stage.Snapshot(ThumbnailWidth, ThumbnailHeight);
+
+        var thumbnail = new PixelImage(ThumbnailWidth, ThumbnailHeight);
+        thumbnail.DrawOver(picture.Image, picture.OffsetX, picture.OffsetY);
+        foreach (var plane in planes.Where(p => p.Number >= found).OrderBy(p => p.Number))
+        {
+            int index = Array.IndexOf(tables.Overlays, plane.Name);
+            if (index >= 0 && frames.TryGetValue(2000 + index, out var overlay))
+                thumbnail.DrawOver(overlay.Image, (int)plane.X * ThumbnailWidth / StageSize.Width + overlay.OffsetX,
+                                   (int)plane.Y * ThumbnailHeight / StageSize.Height + overlay.OffsetY);
+        }
+        return thumbnail;
+    }
+
     #endregion
 
     #region Commands
@@ -269,11 +585,11 @@ public partial class PlayerWindow : ScnMachine.IHost
                         47 => Transition.RuleDarkFirst,
                         _ => Transition.CrossFade,
                     };
-                    BitmapSource? rule = null;
+                    PixelImage? rule = null;
                     if (kind is Transition.RuleBrightFirst or Transition.RuleDarkFirst && !Skipping)
-                        rule = (await LoadImageAsync(line.Arg(1)))?.Bitmap;
+                        rule = (await LoadImageAsync(line.Arg(1)))?.Image;
                     if (line.IntArg(3) != 0)
-                        HideMessageWindow();
+                        m_view.HideMessageWindow();
                     await WaitSkippableAsync(m_stage.DrawEx(kind, Skipping ? 0 : line.IntArg(2), rule));
                     break;
                 }
@@ -297,9 +613,9 @@ public partial class PlayerWindow : ScnMachine.IHost
 
                 case "WINDOW":
                     if (line.IntArg(0) == 0)
-                        HideMessageWindow();
+                        m_view.HideMessageWindow();
                     else
-                        ShowMessageWindow();
+                        m_view.ShowMessageWindow();
                     break;
 
                 case "EFECT":
@@ -500,17 +816,17 @@ public partial class PlayerWindow : ScnMachine.IHost
                 m_stage.QueueLoop(plane, code, P(0), P(1), P(2));
                 break;
             case 40:            // screen area the plane is drawn into
-                m_stage.SetViewTarget(plane, new Rect(P(0), P(1), P(2), P(3)));
+                m_stage.SetViewTarget(plane, new StageRect(P(0), P(1), P(2), P(3)));
                 break;
             case 41:            // part of the plane shown in that area
-                m_stage.SetViewSource(plane, new Rect(P(0), P(1), P(2), P(3)));
+                m_stage.SetViewSource(plane, new StageRect(P(0), P(1), P(2), P(3)));
                 break;
             case >= 42 and <= 44:   // pan / zoom: x, y, w, h, ms, wf; easing 1-3
-                m_stage.QueueView(plane, new Rect(P(0), P(1), P(2), P(3)), code - 41, P(4), P(5) != 0);
+                m_stage.QueueView(plane, new StageRect(P(0), P(1), P(2), P(3)), code - 41, P(4), P(5) != 0);
                 break;
             case >= 60 and <= 63:   // through a rule mask: rule, ms; 60/62 appear, 61/63 disappear, 62/63 reversed
                 if (await LoadImageAsync(line.Arg(2)) is { } rule)
-                    m_stage.QueueRuleFade(plane, rule.Bitmap, code % 2 == 0, code >= 62, line.IntArg(3), false);
+                    m_stage.QueueRuleFade(plane, rule.Image, code % 2 == 0, code >= 62, line.IntArg(3), false);
                 break;
             case 90:            // play sound channel n at every cycle of the loop (footsteps)
             {
@@ -550,8 +866,8 @@ public partial class PlayerWindow : ScnMachine.IHost
                 return m_stage.ZoomPulse(w, h, rounds);
             }
             case 3: return m_stage.Negative(50);
-            case 4: return m_stage.Flash(Colors.White, 50, fade: false);
-            case 5: return m_stage.Flash(Colors.Red, 50, fade: false);
+            case 4: return m_stage.Flash(StageColor.White, 50, fade: false);
+            case 5: return m_stage.Flash(StageColor.Red, 50, fade: false);
             case 6: return m_stage.Negative(1000);
             default: return Task.CompletedTask;
         }
@@ -681,7 +997,7 @@ public partial class PlayerWindow : ScnMachine.IHost
             if ((m_restoreByLine ? pc : index) < m_restoreTo)
                 return;
             m_restoreTo = -1;
-            UpdateModeButtons();
+            m_view.ModesChanged();
         }
 
         // メッセージスキップ 既読: skipping stops at a message never read before
@@ -689,12 +1005,12 @@ public partial class PlayerWindow : ScnMachine.IHost
         if (m_skip && !readBefore && !Config.SkipUnread)
         {
             m_skip = false;
-            UpdateModeButtons();
+            m_view.ModesChanged();
         }
 
-        SetSpeaker(line.Speaker);
-        ShowMessageWindow();
-        TxtNext.Visibility = Visibility.Collapsed;
+        m_view.SetSpeaker(line.Speaker);
+        m_view.ShowMessageWindow();
+        m_view.ShowClickWait(false);
         if (m_autoSave)
         {
             m_autoSave = false;
@@ -703,7 +1019,7 @@ public partial class PlayerWindow : ScnMachine.IHost
 
         if (Skipping)
         {
-            SetMessageText(text, text.Length);
+            m_view.SetMessageText(text, text.Length);
             await Task.Delay(15, m_token);
             return;
         }
@@ -713,14 +1029,14 @@ public partial class PlayerWindow : ScnMachine.IHost
         int characterMs = Config.CharacterMs;
         for (int shown = 1; characterMs > 0 && shown < text.Length; shown++)
         {
-            SetMessageText(text, shown);
+            m_view.SetMessageText(text, shown);
             if (await Task.WhenAny(Task.Delay(characterMs, m_token), click) == click || Skipping)
                 break;
             m_token.ThrowIfCancellationRequested();
         }
-        SetMessageText(text, text.Length);
+        m_view.SetMessageText(text, text.Length);
         m_token.ThrowIfCancellationRequested();
-        TxtNext.Visibility = Visibility.Visible;
+        m_view.ShowClickWait(true);
 
         // Wait for a click; in auto mode go on once the voice has ended and the text had time to be read
         while (!Skipping)
@@ -742,7 +1058,7 @@ public partial class PlayerWindow : ScnMachine.IHost
                 break;
         }
 
-        TxtNext.Visibility = Visibility.Collapsed;
+        m_view.ShowClickWait(false);
         if (!Skipping)
             m_audio.Stop(AudioEngine.Voice);
     }

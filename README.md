@@ -68,6 +68,8 @@ dotnet build -c Release
 
 The program is written to `bin/Release/GrandCrossExtractor/`. The build also copies the scheme data next to the executable: `Formats.Json` and the `ShiinaImage/` folder. The extractor needs both at run time.
 
+The solution has two projects: `GrandCrossExtractor.Engine` holds the archive and image decoders and the story engine without any user interface, and `GrandCrossExtractor` is the Windows (WPF) application built on it.
+
 ## Usage
 
 1. Run `GrandCrossExtractor.exe`.

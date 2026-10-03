@@ -6,7 +6,7 @@
 
 using System.IO;
 using System.Text.Json;
-using System.Windows.Media.Imaging;
+using GrandCrossExtractor.Formats;
 
 namespace GrandCrossExtractor.Player;
 
@@ -60,19 +60,12 @@ public sealed class SaveStore
         }
     }
 
-    public BitmapSource? Thumbnail(int slot)
+    /// <summary>The save's thumbnail as PNG bytes, or null.</summary>
+    public byte[]? Thumbnail(int slot)
     {
         try
         {
-            if (!File.Exists(ThumbnailPath(slot)))
-                return null;
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.UriSource = new Uri(ThumbnailPath(slot));
-            image.EndInit();
-            image.Freeze();
-            return image;
+            return File.Exists(ThumbnailPath(slot)) ? File.ReadAllBytes(ThumbnailPath(slot)) : null;
         }
         catch
         {
@@ -80,21 +73,18 @@ public sealed class SaveStore
         }
     }
 
-    public void Write(int slot, SaveData data, BitmapSource thumbnail)
+    public void Write(int slot, SaveData data, PixelImage thumbnail)
     {
         Directory.CreateDirectory(m_folder);
         File.WriteAllText(DataPath(slot), JsonSerializer.Serialize(data));
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(thumbnail));
-        using var stream = File.Create(ThumbnailPath(slot));
-        encoder.Save(stream);
+        File.WriteAllBytes(ThumbnailPath(slot), PngEncoder.Encode(thumbnail));
     }
 
     /// <summary>
     /// An auto save (START.SCN function 197): AUTO1-AUTO8 move down one slot, the oldest
     /// (AUTO9) is dropped, and the new save becomes AUTO1.
     /// </summary>
-    public void WriteAuto(SaveData data, BitmapSource thumbnail)
+    public void WriteAuto(SaveData data, PixelImage thumbnail)
     {
         Directory.CreateDirectory(m_folder);
         for (int slot = FirstAuto + AutoSlots - 2; slot >= FirstAuto; slot--)
@@ -108,5 +98,19 @@ public sealed class SaveStore
             }
         }
         Write(FirstAuto, data, thumbnail);
+    }
+
+    /// <summary>The message stored with a save: its first 22 bytes (11 full-width characters), then "..." (START.SCN 2C7EB).</summary>
+    public static string Caption(string text)
+    {
+        string shown = ScenarioScript.DisplayText(text);
+        int bytes = 0;
+        for (int i = 0; i < shown.Length; i++)
+        {
+            bytes += MessageLayout.IsHalfWidth(shown[i]) ? 1 : 2;
+            if (bytes > 22)
+                return shown[..i] + "...";
+        }
+        return shown;
     }
 }

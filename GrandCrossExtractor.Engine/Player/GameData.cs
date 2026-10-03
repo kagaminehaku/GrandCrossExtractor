@@ -5,14 +5,13 @@
 // their stem.
 
 using System.IO;
-using System.Windows.Media.Imaging;
 using GrandCrossExtractor.Core;
 using GrandCrossExtractor.Formats;
 
 namespace GrandCrossExtractor.Player;
 
 /// <summary>A decoded picture and where its top-left corner lies on the 800x600 screen.</summary>
-public sealed record StageImage(BitmapSource Bitmap, int Left, int Top)
+public sealed record StageImage(PixelImage Image, int Left, int Top)
 {
     /// <summary>File stem of the picture ("EV02_07B"); save thumbnails are chosen by it.</summary>
     public string Name { get; init; } = "";
@@ -145,7 +144,7 @@ public sealed class GameData : IDisposable
     }
 
     /// <summary>
-    /// Audio in a form NAudio can read: Ogg Vorbis bytes (from OGV or plain Ogg) or a WAV
+    /// Audio in a form AudioEngine can read: Ogg Vorbis bytes (from OGV or plain Ogg) or a WAV
     /// (from PAD). Null when missing.
     /// </summary>
     public byte[]? ReadAudio(string path)
