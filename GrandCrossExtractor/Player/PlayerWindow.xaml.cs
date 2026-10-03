@@ -21,7 +21,15 @@ public partial class PlayerWindow : Window
     private readonly AudioEngine m_audio;
 
     private CancellationTokenSource? m_run;
-    private CancellationToken m_token;
+
+    // The token of the run that this code belongs to. It flows with the async calls, so a run that
+    // was replaced keeps its own cancelled token and stops instead of taking on the new one.
+    private readonly AsyncLocal<CancellationToken> m_runToken = new();
+    private CancellationToken m_token
+    {
+        get => m_runToken.Value;
+        set => m_runToken.Value = value;
+    }
 
     // Modes
     private bool m_auto;
@@ -226,7 +234,7 @@ public partial class PlayerWindow : Window
     /// Plays the story from a scenario file (null = from the beginning), ending any run in
     /// progress. A loaded save gives the routes played and the message to resume at.
     /// </summary>
-    private async void Start(string? file, int played = 0, int message = -1)
+    private async void Start(string? file, int played = 0, int message = -1, IReadOnlyDictionary<string, int>? vars = null, bool byLine = false)
     {
         m_run?.Cancel();
         m_titleRun?.Cancel();
@@ -236,6 +244,7 @@ public partial class PlayerWindow : Window
         m_run = run;
         m_token = run.Token;
         m_restoreTo = message;
+        m_restoreByLine = byLine;
         m_skip = m_auto = false;
         UpdateModeButtons();
         HideMenu();
@@ -243,7 +252,8 @@ public partial class PlayerWindow : Window
 
         try
         {
-            await RunFlowAsync(file, played);
+            // A save of the flow script restarts it with its variables; older saves start at the file
+            await RunFlowAsync(vars == null ? file : null, played, vars);
             // The game goes back to the title screen after the ending
             if (m_run == run)
                 ShowTitle(false);
@@ -615,7 +625,20 @@ public partial class PlayerWindow : Window
             {
                 double top = 250 - (96 + (options.Count - 1) * 100) / 2 - 48 + index * 100;
                 var row = new Canvas { Width = Stage.Width, Height = 96, Background = Brushes.Transparent };
-                if (plain != null)
+                if ((played & (1 << index)) != 0)
+                {
+                    // Played (kind 1): slot 314 at 160/255, not selectable
+                    var dim = m_data.GetSystemFrame(314) ?? plain;
+                    if (dim != null)
+                    {
+                        var picture = new Image { Source = dim.Image, Stretch = Stretch.Fill, Width = dim.Width, Height = dim.Height };
+                        Canvas.SetLeft(picture, dim.OffsetX);
+                        row.Children.Add(picture);
+                    }
+                    row.Opacity = 160 / 255.0;
+                    enabled = false;
+                }
+                else if (plain != null)
                 {
                     var button = HoverImage(plain.Image, plainHot!.Image);
                     button.Width = plain.Width;

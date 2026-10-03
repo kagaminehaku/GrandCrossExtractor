@@ -108,7 +108,7 @@ public partial class PlayerWindow
             return;
         try
         {
-            Saves.Write(QuickSlot, new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now), SaveThumbnail());
+            Saves.Write(QuickSlot, NewSave(Math.Max(0, m_messageIndex - 1), m_lastText), SaveThumbnail());
             ShowNotice("QUICK SAVE");
         }
         catch (Exception ex)
@@ -122,7 +122,7 @@ public partial class PlayerWindow
         if (Saves.Read(QuickSlot) is not { } data)
             ShowNotice("NO QUICK SAVE");
         else
-            Start(data.File, data.Played, data.Message);
+            Load(data);
     }
 
     /// <summary>Shows a short notice where the AUTO / SKIP mode is shown, then puts the mode back.</summary>

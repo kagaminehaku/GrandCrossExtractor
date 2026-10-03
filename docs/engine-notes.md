@@ -168,7 +168,8 @@ choice), reading the archives of the game folder:
 
 | File | Role |
 |---|---|
-| `StoryFlow.cs` | game flow from SRC_MAIN (opening, route menu, choices, ending) and the chapter list |
+| `ScnMachine.cs` | interpreter for SRC_MAIN.SCN (the story order of any game): variables, expressions, jumps, switch / case, local calls; gosub 240 and callmod 203 go to the player |
+| `StoryFlow.cs` | the chapter list (hand-written for Oreimo; the story itself runs from SRC_MAIN) |
 | `ScenarioScript.cs` | TXT parser |
 | `GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
 | `Stage.cs` | 800x600 planes, snapshot-based DRAW / DRAW_EX (cross-fade, rule wipe), plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
@@ -254,7 +255,18 @@ SRC_MAIN.SCN of every game follows the Oreimo pattern (opening, route menu that 
 routes, ejaculation choices, ending). Across all 11 they use few instructions: mov / local / if /
 goto / gosub / lea / switch / case / eval and arithmetic; TXT files run through `gosub 240`
 (357 calls), menus through `callmod 0,203` or `callmod 0,270`; the rest is the staff roll's
-drawing. A small interpreter for this subset could replace the hand-written `StoryFlow`.
+drawing. The player runs this subset with `ScnMachine`:
+
+- The script starts with `goto table[b[250]]` (table of code addresses): b[250] is the scene
+  number set before each `gosub 240`, so loading a save (its a[] / b[] restored) or starting a
+  chapter (b[250] = its scene) restarts SRC_MAIN and lands on that file, after the b[160] auto
+  save request.
+- `callmod 0,203,#5, mode, ?, table, kind, mask`: the table is a count byte and the option
+  strings; kind 0 = text, 1 = text with the options in `mask` greyed (slot 314 at 160/255),
+  >= 2 = pictures from SYSTEM.S25 400 (+10 per option; START 7031A). The answer goes to `g$sel`.
+- Expressions: `_Dn` = a[n] (also the `_D` variables of the scenario files), `_Sn` = b[n],
+  `_Ln` = f[n], `_Zn` = l[n], `{name}`, `shl(x,y)`.
+- Drawing / staff roll instructions are skipped; the time (op 03BD) advances 100 ms per read.
 
 ### Text, choices, L_MONT (used by the player)
 

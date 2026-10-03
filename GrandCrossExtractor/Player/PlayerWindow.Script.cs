@@ -8,11 +8,20 @@ using System.Windows.Media.Imaging;
 
 namespace GrandCrossExtractor.Player;
 
-public partial class PlayerWindow
+public partial class PlayerWindow : ScnMachine.IHost
 {
-    // Script variables (_D710 ...), kept for the whole run
+    // Variables of a run without a flow script (_D710 ...); with one they are its a[]
     private readonly Dictionary<int, int> m_vars = new();
 
+    private int GetVar(int index) => m_machine != null ? m_machine.GetA(index) : m_vars.GetValueOrDefault(index);
+
+    private void SetVar(int index, int value)
+    {
+        if (m_machine != null)
+            m_machine.SetA(index, value);
+        else
+            m_vars[index] = value;
+    }
 
     #region Flow
 
@@ -24,11 +33,90 @@ public partial class PlayerWindow
 
     // Loading a save: messages before this one are passed silently (-1 = not loading)
     private int m_restoreTo = -1;
+    // ... counted by script line (saves that record it) instead of by message number
+    private bool m_restoreByLine;
+    // Script line of the message shown last
+    private int m_messageLine;
+
+    // The game's flow script SRC_MAIN.SCN and the interpreter running it (null: the StoryFlow)
+    private byte[]? m_flowCode;
+    private bool m_flowCodeRead;
+    private ScnMachine? m_machine;
+
+    // START.SCN function 203 draws picture choices from SYSTEM.S25 slot 400 (+10 per option)
+    private const int ChoiceImageSlot = 400;
 
     // SRC_MAIN sets b[160] before every scenario file but the first: its first message is auto saved
     private bool m_autoSave;
 
-    private async Task RunFlowAsync(string? startFile, int initialPlayed = 0)
+    /// <summary>
+    /// Plays the story: SRC_MAIN.SCN when the game has it, from the beginning, from a scenario
+    /// file (its scene number and route), or from the variables of a save.
+    /// </summary>
+    private async Task RunFlowAsync(string? startFile, int initialPlayed = 0, IReadOnlyDictionary<string, int>? vars = null)
+    {
+        if (!m_flowCodeRead)
+        {
+            m_flowCodeRead = true;
+            m_flowCode = await Task.Run(() => m_data.Read("SRC_MAIN.SCN", ".SCN"));
+        }
+        if (m_flowCode == null)
+        {
+            m_machine = null;
+            await RunStoryFlowAsync(startFile, initialPlayed);
+            return;
+        }
+
+        var machine = m_machine = new ScnMachine(m_flowCode);
+        if (vars != null)
+        {
+            machine.Restore(vars);
+        }
+        else if (startFile != null)
+        {
+            // The scene number makes SRC_MAIN jump to the file (as after loading a save)
+            var scene = machine.FindScenes().FirstOrDefault(s => Same(ScriptStem(s.File), startFile));
+            if (scene.File == null)
+                throw new InvalidOperationException($"{startFile} is not in SRC_MAIN.SCN.");
+            machine.SetB(250, scene.Scene);
+            machine.SetA(PlayedVar, RoutesPlayedAt(startFile, initialPlayed));
+        }
+        await machine.RunAsync(this, m_token);
+    }
+
+    // a[780]: the routes played, a bit per option of the route menu
+    private const int PlayedVar = 780;
+
+    /// <summary>The routes played when a file is started from the chapter list: its own route, or all for the ending.</summary>
+    private int RoutesPlayedAt(string file, int played)
+    {
+        for (int r = 0; r < m_flow.Routes.Count; r++)
+            if (RouteContains(m_flow.Routes[r], file))
+                return played | 1 << r;
+        return m_flow.Ending.Any(f => Same(f, file)) ? (1 << m_flow.Routes.Count) - 1 : played;
+    }
+
+    private static string ScriptStem(string path) => System.IO.Path.GetFileNameWithoutExtension(path.Replace('\\', '/'));
+
+    Task ScnMachine.IHost.RunScenarioAsync(string file)
+    {
+        m_played = m_machine?.GetA(PlayedVar) ?? m_played;
+        return PlayScriptAsync(ScriptStem(file).ToUpperInvariant());
+    }
+
+    async Task<int> ScnMachine.IHost.CallAsync(int function, int[] args)
+    {
+        // callmod 0,203,#5, mode, ?, choice table, kind (0 text, 1 text with played options
+        // greyed, 2 pictures), played mask
+        if (function == 203 && args.Length >= 5 && m_machine != null)
+        {
+            var options = m_machine.ReadChoices(args[2]);
+            return await ChooseAsync(options, args[3] >= 2 ? ChoiceImageSlot : -1, args[3] >= 1 ? args[4] : 0);
+        }
+        return 0;
+    }
+
+    private async Task RunStoryFlowAsync(string? startFile, int initialPlayed)
     {
         int all = (1 << m_flow.Routes.Count) - 1;
         int played = m_played = initialPlayed;
@@ -113,7 +201,16 @@ public partial class PlayerWindow
     {
         m_file = file;
         m_messageIndex = 0;
-        m_autoSave = m_restoreTo < 0 && !Same(file, m_flow.Opening.FirstOrDefault());
+        if (m_machine != null)
+        {
+            // b[160] asks for an auto save at the file's first message
+            m_autoSave = m_restoreTo < 0 && m_machine.GetB(160) != 0;
+            m_machine.SetB(160, 0);
+        }
+        else
+        {
+            m_autoSave = m_restoreTo < 0 && !Same(file, m_flow.Opening.FirstOrDefault());
+        }
         var script = await Task.Run(() => m_data.LoadScript(file)).WaitAsync(m_token)
             ?? throw new InvalidOperationException($"The scenario file {file} is missing.");
         await ExecuteAsync(script);
@@ -132,8 +229,9 @@ public partial class PlayerWindow
         {
             m_token.ThrowIfCancellationRequested();
 
-            // Skipping inside an $EVENT_BLOCK jumps to its end label
-            if (eventBlockEnd is int label && Skipping && script.Labels.TryGetValue(label, out int target) && target > pc)
+            // Skipping inside an $EVENT_BLOCK jumps to its end label; loading a save plays it
+            // silently instead, so that it finds the saved message
+            if (eventBlockEnd is int label && Skipping && m_restoreTo < 0 && script.Labels.TryGetValue(label, out int target) && target > pc)
             {
                 pc = target;
                 eventBlockEnd = null;
@@ -143,7 +241,7 @@ public partial class PlayerWindow
             var line = lines[pc];
             if (line.Text != null)
             {
-                await ShowMessageAsync(line);
+                await ShowMessageAsync(line, pc);
                 continue;
             }
 
@@ -516,7 +614,7 @@ public partial class PlayerWindow
                 }
                 break;
             case 10 when line.IntArg(1) == 2:
-                m_vars[line.IntArg(2)] = line.IntArg(3);
+                SetVar(line.IntArg(2), line.IntArg(3));
                 break;
             case 2:
                 if (!Skipping)
@@ -531,7 +629,7 @@ public partial class PlayerWindow
         var m = Regex.Match(text, @"^_D(\d+)\s*(==|!=|>=|<=|>|<)\s*(-?\d+)$");
         if (!m.Success)
             return false;
-        int value = m_vars.GetValueOrDefault(int.Parse(m.Groups[1].Value));
+        int value = GetVar(int.Parse(m.Groups[1].Value));
         int other = int.Parse(m.Groups[3].Value);
         return m.Groups[2].Value switch
         {
@@ -567,7 +665,7 @@ public partial class PlayerWindow
     // Voice file of the message being shown, for the backlog
     private string? m_pendingVoice;
 
-    private async Task ShowMessageAsync(ScriptLine line)
+    private async Task ShowMessageAsync(ScriptLine line, int pc)
     {
         string text = line.Text!;
         string? voice = m_pendingVoice;
@@ -577,9 +675,10 @@ public partial class PlayerWindow
         // Loading a save: pass the messages before the saved one
         int index = m_messageIndex++;
         m_lastText = text;
+        m_messageLine = pc;
         if (m_restoreTo >= 0)
         {
-            if (index < m_restoreTo)
+            if ((m_restoreByLine ? pc : index) < m_restoreTo)
                 return;
             m_restoreTo = -1;
             UpdateModeButtons();

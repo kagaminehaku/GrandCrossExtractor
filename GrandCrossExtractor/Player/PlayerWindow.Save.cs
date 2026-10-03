@@ -222,7 +222,7 @@ public partial class PlayerWindow
     {
         if (m_saving)
         {
-            var save = new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now);
+            var save = NewSave(Math.Max(0, m_messageIndex - 1), m_lastText);
             try
             {
                 Saves.Write(slot, save, m_pendingThumbnail ?? SaveThumbnail());
@@ -237,7 +237,7 @@ public partial class PlayerWindow
         if (data == null)
             return;
         HideSavePage();
-        Start(data.File, data.Played, data.Message);
+        Load(data);
     }
 
     private void AddFrame(S25Frame frame)
@@ -270,12 +270,18 @@ public partial class PlayerWindow
         SaveLayer.Children.Add(image);
     }
 
+    /// <summary>Where the story is now, with the flow script's variables.</summary>
+    private SaveData NewSave(int message, string text) =>
+        new(m_file, message, m_machine?.GetA(PlayedVar) ?? m_played, text, DateTime.Now) { Vars = m_machine?.Snapshot(), Line = m_messageLine };
+
+    private void Load(SaveData data) => Start(data.File, data.Played, data.Line >= 0 ? data.Line : data.Message, data.Vars, data.Line >= 0);
+
     /// <summary>Auto save at the first message of a scenario file (START.SCN function 197).</summary>
     private void AutoSave(int message, string text)
     {
         try
         {
-            Saves.WriteAuto(new SaveData(m_file, message, m_played, text, DateTime.Now), SaveThumbnail());
+            Saves.WriteAuto(NewSave(message, text), SaveThumbnail());
         }
         catch
         {

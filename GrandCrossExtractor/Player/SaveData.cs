@@ -10,7 +10,17 @@ using System.Windows.Media.Imaging;
 
 namespace GrandCrossExtractor.Player;
 
-public sealed record SaveData(string File, int Message, int Played, string Text, DateTime Time);
+/// <summary>
+/// A save: the scenario file and message, the routes played, the message text and time; with a flow
+/// script (SRC_MAIN.SCN) its global variables, which bring it back to the file as the game does.
+/// </summary>
+public sealed record SaveData(string File, int Message, int Played, string Text, DateTime Time)
+{
+    public Dictionary<string, int>? Vars { get; init; }
+
+    /// <summary>Script line of the message (-1 in older saves, which count messages instead).</summary>
+    public int Line { get; init; } = -1;
+}
 
 /// <summary>Where the player keeps saves and settings: %AppData%\GrandCrossExtractor, or GCX_PLAYER_DATA.</summary>
 public static class PlayerFolders
