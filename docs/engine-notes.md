@@ -174,14 +174,11 @@ choice), reading the archives of the game folder:
 | `Stage.cs` | 800x600 planes, snapshot-based DRAW / DRAW_EX (cross-fade, rule wipe), plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
 | `AudioEngine.cs` | NAudio mixer: BGM, voice, SE channels, loops, fades |
 | `MessageText.cs` | message text with the engine's font metrics, kinsoku and gaiji |
-| `PlayerWindow.*` | title screen, message window and its button bar, choices, auto / skip, chapter list (`.Script` interpreter, `.Save` save / load pages, `.Option` OPTION page, backlog page, settings) |
-| `SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` |
+| `PlayerWindow.*` | title screen, message window and its button bar, choices, auto / skip, chapter list (`.Script` interpreter, `.Save` save / load pages and auto save, `.Option` OPTION page, backlog page, settings, `.Dialog` YES / NO dialog) |
+| `SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` (`GCX_PLAYER_DATA` points them elsewhere, for tests) |
 
-Command behaviour and the screens follow section 8. Approximated: the per-plane rule fade
-(A_CHR 60-63) uses the screen wipe formula, EFECT 3 / 6 flashes. Not done: THSAVE.S25 slot
-thumbnails (a screenshot is stored), the AUTO save page, the game's confirmation dialogs (Windows
-message boxes), ruby, the engine's own lip sync / blinking, other games' flows (each needs its
-SRC_MAIN read).
+Command behaviour and the screens follow section 8. Not done: ruby, the engine's own lip sync /
+blinking, other games' flows (each needs its SRC_MAIN read).
 
 ## 7. Tools
 
@@ -208,6 +205,11 @@ DRAW_EX 423F5, EFECT 42EC3, SE 454A6, EX 46E58, A_CHR 4766C, WAITA 41B0B, L_MONT
 - **A_CHR 40** target rect, **41** source rect (1/16 px), **42/43/44** pan to rect with easing
   linear / 1-cos (ease-in) / sin (ease-out).
 - **A_CHR 60-63** rule fade of a plane: 60/62 in, 61/63 out then remove; 62/63 reversed rule.
+  Plane update 13DB7: trs = 511·e/d (record +332 != 0, out) or 511 - 511·e/d (in), 0 = shown.
+  16D5E calls the MMX routine 796E5 on the plane's alpha with imin / imax = 0 / trs (trs < 256)
+  or trs - 256 / 255, rule value m (255 - m when record +336 says reversed): m >= imax keeps the
+  alpha, imin < m < imax scales it by (m - imin + 1)·(0x8080 / (imax - imin + 1)) >> 15 (bias
+  0 when imin = 0), m <= imin clears it. So bright rule pixels appear first and vanish last.
 - **A_CHR 100-129** = function 306 (L_674FE) type c-100; **150** = type 13 (fade out, then
   remove plane), **151** = type 19 (fade in, default 1000 ms), **152** = type 0 (plane
   cross-fade, default 500). Type table at 0x680F0: 1-3,15 slide in from (0,800)/(-800,0)/(800,0)/
@@ -223,7 +225,9 @@ DRAW_EX 423F5, EFECT 42EC3, SE 454A6, EX 46E58, A_CHR 4766C, WAITA 41B0B, L_MONT
   **bright rule pixels change first**; kind 47: dark first. Soft edge = full 256 levels.
 - **EFECT n** (function 217, blocking): 0/1/2 = EFCLIB 34 shake with zoom-in a = 16/32/8 px,
   offsets (0,-a) (-a/2,-a/2) (-a,-a) (-a/2,-a/2), 15 fps, 2 rounds; 12 = EFCLIB 35 zoom pulse
-  crop 16z x 12z, z = 1,2,3,2,1 at 15 fps; 4 white / 5 red 50 ms flash; 3/6 fade flashes.
+  crop 16z x 12z, z = 1,2,3,2,1 at 15 fps; 4 white / 5 red 50 ms flash; 3 / 6 = EFCLIB 21
+  with 255: native code at EFCLIB 1E9E XORs every screen byte with 255 (negative), held 50 /
+  1000 ms, then the screen saved in VRAM 1 comes back.
 - **EX,9** `0,count,width` / `1,slot,file` / `2,speed` / `4`: speed = px per second, sign =
   direction (positive moves the picture right). **SE** `file, mode (0 once, 1 loop, 2 once and
   wait, 3 load only), channel` (slot = channel + 11). **MUSIC** `file, loop, fade-in ms`.
@@ -273,11 +277,26 @@ drawing. A small interpreter for this subset could replace the hand-written `Sto
   `d\caution` (0.6 s fade, until a click), `d\white`, then TITLE.S25 slot 0 with `m\oreplus_01`.
   Buttons (function 230) are TITLE.S25 slot groups 10 スタート, 20 ロード, 30 オプション, 80 おわる
   (slot + 1 = larger highlighted picture). After the ending SRC_MAIN loads topmenu.scn again.
-- **Save / load pages**: SYSTEM.S25 2010 SAVE / 2011 LOAD (2 x 5 slots, boxes at 63 + 352·col,
-  62 + 101·row), page tabs 2030 + 10·k (PAGE 1-9, AUTO; +1 highlighted, +2 current), BACK 2170.
-  900 = backlog page, 1000 = OPTION page. The game's slot pictures are fixed THSAVE.S25 thumbnails
-  (frames 0-140, 100x75; mapping not decoded); the player stores a screenshot instead. A player
-  save is {file, message number, routes played}; loading replays the file silently to that message.
+- **Save / load pages** (function 247, 27D3C): SYSTEM.S25 2010 SAVE / 2011 LOAD, 2 x 5 slots with
+  hit boxes 2200 (300 x 88 at 57,57, transparent) moved 352·col, 101·row; slot numbers 2300 + page
+  (2309 = AUTO1-9 and QUICK); gold frame 2230 on the slot under the mouse; NEW 2220 on the slot
+  saved last (b[219]); page tabs 2030 + 10·k (PAGE 1-9, AUTO; +1 highlighted, +2 current), BACK
+  2170. Slots are page·10 + n; 90-98 = AUTO1-9, 99 = QUICK (QSAVE / QLOAD, no dialog). Saving
+  over a slot and loading ask nothing. The message stored with a save is cut after 22 bytes + "...".
+  900 = backlog page, 1000 = OPTION page. A player save is {file, message number, routes played};
+  loading replays the file silently to that message.
+- **Auto save** (function 197, 2DBD2): SRC_MAIN sets b[160] = 1 before every `gosub 240` except
+  the opening (ore01); the message routine (3D1B1) then auto saves at that file's first message:
+  slots 90-97 move down one (98 dropped) and the save goes to 90 (AUTO1).
+- **Save thumbnail** (2CBF4): THSAVE.S25 is loaded as bank 26. Planes 9 down to 0: the first
+  whose picture is in the table at 2D173 (141 event CGs) gives frame n; on plane 0 a playing
+  movie (b[19] & 2, name b[420]) is looked up in the next table (24 `mv\*.mpg`, frame 3000 + n)
+  instead. Then for that plane and the planes above, a picture of the third table (9 CGs) adds
+  frame 2000 + n at (x·100/800, y·75/600). No match: the screen scaled to 100 x 75.
+- **YES / NO dialog** (function 244, 231F4, argument = question slot): records bank 27 slot 0 (the
+  screen), SYSTEM.S25 10 twice (black, alpha 128), the question 231 終了しますか？ (QUIT, title
+  おわる) / 232 タイトルへ戻りますか？ (TITLE, only when b[167] = 0), buttons YES 220-222 at (293,229)
+  and NO 210-212 at (427,229); a right click or NO returns -1.
 - **Message window bar**: SYSTEM.S25 120 QSAVE, 130 QLOAD, 100 AUTO, 80 SAVE, 90 LOAD, 150 SKIP,
   140 OPTION, 110 TITLE, 190 QUIT, 180 × (hide window); +1 highlighted, +2 on.
 - **OPTION page** (1000): volume knobs 1600 / 1400 / 1500 (music, voice, SE; 197 px range, arrows

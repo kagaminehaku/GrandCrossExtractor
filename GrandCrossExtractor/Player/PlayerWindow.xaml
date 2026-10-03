@@ -105,6 +105,9 @@
                 <!-- SAVE / LOAD pages -->
                 <Canvas x:Name="SaveLayer" Visibility="Collapsed" Background="Black"/>
 
+                <!-- YES / NO dialog: SYSTEM.S25 231 / 232 -->
+                <Canvas x:Name="DialogLayer" Visibility="Collapsed" Background="Transparent"/>
+
                 <!-- Chapter list -->
                 <Grid x:Name="MenuLayer" Background="#F2101016" Visibility="Collapsed">
                     <Grid.RowDefinitions>

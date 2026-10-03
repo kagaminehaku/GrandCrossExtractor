@@ -12,7 +12,18 @@ using GrandCrossExtractor.Formats;
 namespace GrandCrossExtractor.Player;
 
 /// <summary>A decoded picture and where its top-left corner lies on the 800x600 screen.</summary>
-public sealed record StageImage(BitmapSource Bitmap, int Left, int Top);
+public sealed record StageImage(BitmapSource Bitmap, int Left, int Top)
+{
+    /// <summary>File stem of the picture ("EV02_07B"); save thumbnails are chosen by it.</summary>
+    public string Name { get; init; } = "";
+}
+
+/// <summary>
+/// Pictures with a fixed save thumbnail in THSAVE.S25 (file stems, START.SCN 2D173): picture n
+/// has frame n, movie n (shown on plane 0) frame 3000 + n, and overlay n (a picture drawn over
+/// the thumbnail at its plane position) frame 2000 + n.
+/// </summary>
+public sealed record ThumbnailTables(string[] Pictures, string[] Movies, string[] Overlays);
 
 /// <summary>A layered picture chosen by an expression code (MONTBL.BIN): the S25 file and its slots.</summary>
 public sealed record Montage(string File, int[] Slots);
@@ -34,6 +45,7 @@ public sealed class GameData : IDisposable
     private byte[]? m_montageTable;
     private Dictionary<string, int>? m_nameWindows;
     private Dictionary<int, S25Frame>? m_system;
+    private ThumbnailTables? m_thumbnailTables;
 
     private GameData(string folder, string schemeName)
     {
@@ -189,10 +201,11 @@ public sealed class GameData : IDisposable
         if (frames == null || frames.Count == 0)
             return null;
 
+        string name = Stem(path).ToUpperInvariant();
         if (slots == null || slots.Count == 0)
         {
             var first = frames.OrderBy(f => f.Slot).First();
-            return new StageImage(first.Image, first.OffsetX, first.OffsetY);
+            return new StageImage(first.Image, first.OffsetX, first.OffsetY) { Name = name };
         }
 
         var bySlot = frames.ToDictionary(f => f.Slot);
@@ -200,10 +213,67 @@ public sealed class GameData : IDisposable
         if (parts.Count == 0)
             return null;
         if (parts.Count == 1)
-            return new StageImage(parts[0].Image, parts[0].OffsetX, parts[0].OffsetY);
+            return new StageImage(parts[0].Image, parts[0].OffsetX, parts[0].OffsetY) { Name = name };
 
         var (bitmap, left, top) = S25Composer.ComposeFrames(parts);
-        return new StageImage(bitmap, left, top);
+        return new StageImage(bitmap, left, top) { Name = name };
+    }
+
+    /// <summary>
+    /// The save thumbnail tables, read from the data of START.SCN's save function: a list of
+    /// "e\....s25" names, an empty string, the "mv\....mpg" movies, an empty string, and the
+    /// overlay pictures. Null when the game has no such tables.
+    /// </summary>
+    public ThumbnailTables? GetThumbnailTables()
+    {
+        if (m_thumbnailTables != null)
+            return m_thumbnailTables.Pictures.Length == 0 ? null : m_thumbnailTables;
+        m_thumbnailTables = new ThumbnailTables([], [], []);
+        var code = Read("START.SCN", ".SCN");
+        if (code == null)
+            return null;
+
+        static bool IsName(string s, string ext) =>
+            s.Length > 6 && s.IndexOf('\\') is 1 or 2 && s.EndsWith(ext, StringComparison.OrdinalIgnoreCase) && s.All(c => c > ' ' && c < 0x7F);
+        string StringAt(int at)
+        {
+            int end = Array.IndexOf(code, (byte)0, at);
+            return end < 0 ? "" : Encodings.cp932.GetString(code, at, end - at);
+        }
+        List<string> Forward(ref int at, string ext)
+        {
+            var list = new List<string>();
+            for (string s; IsName(s = StringAt(at), ext); at += s.Length + 1)
+                list.Add(Stem(s).ToUpperInvariant());
+            return list;
+        }
+
+        // The picture list ends with ".s25\0\0" and the movie list follows
+        var marker = Encodings.cp932.GetBytes(".s25\0\0mv\\");
+        int found = code.AsSpan().IndexOf(marker);
+        if (found < 0)
+            return null;
+
+        // Walk back over the picture names
+        var pictures = new List<string>();
+        int start = found + 4;      // the 0 after the last name
+        while (true)
+        {
+            int prev = Array.LastIndexOf(code, (byte)0, start - 1);
+            if (prev < 0)
+                break;
+            string s = Encodings.cp932.GetString(code, prev + 1, start - prev - 1);
+            if (!IsName(s, ".s25"))
+                break;
+            pictures.Insert(0, Stem(s).ToUpperInvariant());
+            start = prev;
+        }
+        int next = found + 6;
+        var movies = Forward(ref next, ".mpg");
+        next++;
+        var overlays = Forward(ref next, ".s25");
+        m_thumbnailTables = new ThumbnailTables(pictures.ToArray(), movies.ToArray(), overlays.ToArray());
+        return pictures.Count == 0 ? null : m_thumbnailTables;
     }
 
     /// <summary>

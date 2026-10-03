@@ -1,5 +1,5 @@
 // The player's OPTION settings and the messages already read, kept per game in
-// %AppData%\GrandCrossExtractor\config. Defaults are the engine's (START.SCN 23989):
+// %AppData%\GrandCrossExtractor\config (see PlayerFolders). Defaults are the engine's (START.SCN 23989):
 // sliders b[1] / b[2] / b[5] = 19 / 39 / 26 of 49, message speed b[3] = 2 (標準).
 
 using System.IO;
@@ -32,9 +32,7 @@ public sealed class PlayerConfig
     public int AutoDelay(int length, bool voiced) =>
         new[] { 300, 700, 1200, 2000 }[Math.Clamp(AutoWait, 0, 3)] + (voiced ? 0 : 50 * length);
 
-    private static string Folder(string game) => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GrandCrossExtractor", "config",
-        string.Concat(game.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)));
+    private static string Folder(string game) => PlayerFolders.For("config", game);
 
     public static PlayerConfig Load(string game)
     {

@@ -95,25 +95,12 @@ public partial class PlayerWindow
         SystemButton(BarLayer, 150, ToggleSkip, m_skip);
         SystemButton(BarLayer, 140, ShowOption);
         SystemButton(BarLayer, 110, BackToTitle);
-        SystemButton(BarLayer, 190, () =>
-        {
-            if (Confirm("Quit the game?"))
-                Close();
-        });
+        SystemButton(BarLayer, 190, QuitGame);
         SystemButton(BarLayer, 180, ToggleHideWindow);
     }
 
-    private bool Confirm(string question) =>
-        MessageBox.Show(this, question, m_flow.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
-
-    private void BackToTitle()
-    {
-        if (Confirm("Return to the title screen?"))
-            ShowTitle(false);
-    }
-
-    // Quick save: a slot of its own after the ten pages
-    private const int QuickSlot = SaveStore.SlotsPerPage * SaveStore.Pages;
+    // Quick save: QUICK, the last slot of the AUTO page
+    private const int QuickSlot = SaveStore.QuickSlot;
 
     private void QuickSave()
     {
@@ -121,7 +108,7 @@ public partial class PlayerWindow
             return;
         try
         {
-            Saves.Write(QuickSlot, new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now), StageThumbnail());
+            Saves.Write(QuickSlot, new SaveData(m_file, Math.Max(0, m_messageIndex - 1), m_played, m_lastText, DateTime.Now), SaveThumbnail());
             ShowNotice("QUICK SAVE");
         }
         catch (Exception ex)
@@ -134,7 +121,7 @@ public partial class PlayerWindow
     {
         if (Saves.Read(QuickSlot) is not { } data)
             ShowNotice("NO QUICK SAVE");
-        else if (Confirm("Load the quick save?"))
+        else
             Start(data.File, data.Played, data.Message);
     }
 
@@ -230,11 +217,7 @@ public partial class PlayerWindow
         Choice(1310, c.SkipUnread, () => c.SkipUnread = true);
 
         if (IsRunning)
-            SystemButton(OptionLayer, 1050, () =>
-            {
-                HideOption();
-                BackToTitle();
-            });
+            SystemButton(OptionLayer, 1050, BackToTitle);
         SystemButton(OptionLayer, 1060, HideOption);
     }
 

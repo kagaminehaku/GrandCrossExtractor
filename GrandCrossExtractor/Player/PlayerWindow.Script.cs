@@ -25,6 +25,9 @@ public partial class PlayerWindow
     // Loading a save: messages before this one are passed silently (-1 = not loading)
     private int m_restoreTo = -1;
 
+    // SRC_MAIN sets b[160] before every scenario file but the first: its first message is auto saved
+    private bool m_autoSave;
+
     private async Task RunFlowAsync(string? startFile, int initialPlayed = 0)
     {
         int all = (1 << m_flow.Routes.Count) - 1;
@@ -110,6 +113,7 @@ public partial class PlayerWindow
     {
         m_file = file;
         m_messageIndex = 0;
+        m_autoSave = m_restoreTo < 0 && !Same(file, m_flow.Opening.FirstOrDefault());
         var script = await Task.Run(() => m_data.LoadScript(file)).WaitAsync(m_token)
             ?? throw new InvalidOperationException($"The scenario file {file} is missing.");
         await ExecuteAsync(script);
@@ -447,10 +451,10 @@ public partial class PlayerWindow
                 var (w, h, rounds) = pulses[pulseOf[effect - 8]];
                 return m_stage.ZoomPulse(w, h, rounds);
             }
-            case 3: return m_stage.Flash(Colors.White, 300, fade: true);
+            case 3: return m_stage.Negative(50);
             case 4: return m_stage.Flash(Colors.White, 50, fade: false);
             case 5: return m_stage.Flash(Colors.Red, 50, fade: false);
-            case 6: return m_stage.Flash(Colors.White, 1000, fade: true);
+            case 6: return m_stage.Negative(1000);
             default: return Task.CompletedTask;
         }
     }
@@ -592,6 +596,11 @@ public partial class PlayerWindow
         SetSpeaker(line.Speaker);
         ShowMessageWindow();
         TxtNext.Visibility = Visibility.Collapsed;
+        if (m_autoSave)
+        {
+            m_autoSave = false;
+            AutoSave(index, text);
+        }
 
         if (Skipping)
         {

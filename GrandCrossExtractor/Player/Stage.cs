@@ -35,6 +35,7 @@ public sealed class Stage
     private readonly Canvas m_content = new() { Width = Width, Height = Height, Background = Brushes.Black };
     private readonly Image m_overlay = new() { Width = Width, Height = Height, Stretch = Stretch.Fill, Visibility = Visibility.Collapsed };
     private readonly Rectangle m_flash = new() { Width = Width, Height = Height, Fill = Brushes.White, Opacity = 0, IsHitTestVisible = false };
+    private readonly Image m_negative = new() { Width = Width, Height = Height, Stretch = Stretch.Fill, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
 
     private readonly SortedDictionary<int, Plane> m_planes = new();
     private readonly List<Anim> m_running = new();
@@ -64,6 +65,7 @@ public sealed class Stage
         m_effect.Children.Add(m_content);
         m_effect.Children.Add(m_overlay);
         m_effect.Children.Add(m_flash);
+        m_effect.Children.Add(m_negative);
         RenderOptions.SetBitmapScalingMode(m_content, BitmapScalingMode.HighQuality);
     }
 
@@ -199,6 +201,10 @@ public sealed class Stage
         foreach (int number in m_planes.Keys.Where(n => n > 0).ToList())
             RemovePlane(number);
     }
+
+    /// <summary>Planes showing a picture: number, picture name and position, for save thumbnails.</summary>
+    public IEnumerable<(int Number, string Name, double X, double Y)> PictureNames() =>
+        m_planes.Where(p => p.Value.Picture != null).Select(p => (p.Key, p.Value.Picture!.Name, p.Value.X, p.Value.Y)).ToList();
 
     public bool TryGetPosition(int number, out double x, out double y)
     {
@@ -530,8 +536,9 @@ public sealed class Stage
         });
 
     /// <summary>
-    /// A_CHR 60-63: the plane appears (or disappears, then is removed) through a rule mask;
-    /// <paramref name="reversed"/> swaps the mask's bright and dark parts.
+    /// A_CHR 60-63: the plane appears (or disappears, then is removed) through a rule mask,
+    /// bright rule pixels showing first and vanishing last; <paramref name="reversed"/> swaps the
+    /// mask's bright and dark parts.
     /// </summary>
     public void QueueRuleFade(int number, BitmapSource rule, bool appear, bool reversed, double ms, bool background)
     {
@@ -543,12 +550,18 @@ public sealed class Stage
         var pixels = new byte[Width * Height * 4];
         void Paint(double t)
         {
-            // Weight of the plane: like the screen wipe, a 256-level soft edge sweeping across
-            double level = 511 * (appear ? t : 1 - t);
+            // START.SCN 13E8D: trs runs 511 -> 0 to appear, 0 -> 511 to vanish (0 = all shown).
+            // The MMX blend at 796E5 keeps rule values >= imax, ramps (imin, imax), drops the rest:
+            // trs < 256: imin 0, imax trs; else imin trs - 256, imax 255
+            int trs = (int)(511 * t);
+            if (appear)
+                trs = 511 - trs;
+            int imin = trs < 256 ? 0 : trs - 256, imax = trs < 256 ? trs : 255;
+            int step = 0x8080 / (imax - imin + 1), bias = imin == 0 ? 0 : imin - 1;
             for (int i = 0, p = 0; i < levels.Length; i++, p += 4)
             {
-                int r = reversed ? 255 - levels[i] : levels[i];
-                double w = Math.Clamp(level + r - 256, 0, 256) * 255 / 256;
+                int m = reversed ? 255 - levels[i] : levels[i];
+                int w = trs == 0 || m >= imax ? 255 : m > imin ? (m - bias) * step * 255 >> 15 : 0;
                 pixels[p] = pixels[p + 1] = pixels[p + 2] = pixels[p + 3] = (byte)w;
             }
             mask.WritePixels(new Int32Rect(0, 0, Width, Height), pixels, Width * 4, 0);
@@ -800,6 +813,40 @@ public sealed class Stage
         return anim.Done.Task;
     }
 
+    /// <summary>
+    /// EFCLIB 21 with 255 ($EFECT 3 / 6): every byte of the screen XOR 255, the negative, held for
+    /// <paramref name="ms"/>; then the saved screen comes back.
+    /// </summary>
+    public Task Negative(double ms)
+    {
+        var shot = new RenderTargetBitmap(Width, Height, 96, 96, PixelFormats.Pbgra32);
+        shot.Render(m_effect);
+        var pixels = new byte[Width * Height * 4];
+        shot.CopyPixels(pixels, Width * 4, 0);
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] ^= 255;
+            pixels[i + 1] ^= 255;
+            pixels[i + 2] ^= 255;
+            pixels[i + 3] = 255;
+        }
+        var negative = BitmapSource.Create(Width, Height, 96, 96, PixelFormats.Bgra32, null, pixels, Width * 4);
+        negative.Freeze();
+        var anim = new Anim { Kind = "effect", Duration = ms };
+        anim.Started = () =>
+        {
+            m_negative.Source = negative;
+            m_negative.Visibility = Visibility.Visible;
+        };
+        anim.Finished = () =>
+        {
+            m_negative.Visibility = Visibility.Collapsed;
+            m_negative.Source = null;
+        };
+        Run(anim);
+        return anim.Done.Task;
+    }
+
     #endregion
 
     #region Background scroll
@@ -887,6 +934,7 @@ public sealed class Stage
         StopMovie();
         if (path == null)
             return;
+        MovieName = System.IO.Path.GetFileNameWithoutExtension(path).ToUpperInvariant();
         m_movieLoop = loop;
         m_movieEnd = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var movie = new MediaElement
@@ -920,8 +968,12 @@ public sealed class Stage
         movie.Play();
     }
 
+    /// <summary>File stem of the movie playing, or null.</summary>
+    public string? MovieName { get; private set; }
+
     public void StopMovie()
     {
+        MovieName = null;
         if (m_movie == null)
             return;
         m_movie.Stop();
@@ -960,6 +1012,7 @@ public sealed class Stage
         m_frozen = false;
         HideOverlay();
         m_flash.Opacity = 0;
+        m_negative.Visibility = Visibility.Collapsed;
         m_effect.RenderTransform = Transform.Identity;
     }
 }

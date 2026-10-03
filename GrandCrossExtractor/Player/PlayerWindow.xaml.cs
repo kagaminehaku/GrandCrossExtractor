@@ -140,7 +140,7 @@ public partial class PlayerWindow : Window
             AddTitleButton(frames, 10, () => Start(null));       // スタート
             AddTitleButton(frames, 20, () => ShowSavePage(saving: false));   // ロード
             AddTitleButton(frames, 30, ShowOption);              // オプション
-            AddTitleButton(frames, 80, Close);                   // おわる
+            AddTitleButton(frames, 80, QuitGame);                // おわる
             TitleLayer.Visibility = Visibility.Visible;
         }
         catch (OperationCanceledException)
@@ -287,7 +287,7 @@ public partial class PlayerWindow : Window
     {
         if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible ||
             TitleLayer.Visibility == Visibility.Visible || SaveLayer.Visibility == Visibility.Visible ||
-            OptionLayer.Visibility == Visibility.Visible)
+            OptionLayer.Visibility == Visibility.Visible || DialogOpen)
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
@@ -315,8 +315,10 @@ public partial class PlayerWindow : Window
 
     private void Screen_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
-        // Right click closes a page, as in the game, or hides the message window
-        if (LogLayer.Visibility == Visibility.Visible)
+        // Right click answers NO, closes a page, as in the game, or hides the message window
+        if (DialogOpen)
+            CloseDialog(false);
+        else if (LogLayer.Visibility == Visibility.Visible)
             HideLog();
         else if (OptionLayer.Visibility == Visibility.Visible)
             HideOption();
@@ -328,7 +330,7 @@ public partial class PlayerWindow : Window
 
     private void ToggleHideWindow()
     {
-        if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible)
+        if (MenuLayer.Visibility == Visibility.Visible || ChoiceLayer.Visibility == Visibility.Visible || DialogOpen)
             return;
         if (m_userHidWindow)
         {
@@ -344,6 +346,14 @@ public partial class PlayerWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (DialogOpen)
+        {
+            // Only the dialog's own answers while it is open
+            if (key == Key.Escape)
+                CloseDialog(false);
+            e.Handled = true;
+            return;
+        }
         switch (key)
         {
             case Key.Enter when (Keyboard.Modifiers & ModifierKeys.Alt) != 0:
@@ -418,7 +428,7 @@ public partial class PlayerWindow : Window
 
     private void Window_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (MenuLayer.Visibility == Visibility.Visible)
+        if (MenuLayer.Visibility == Visibility.Visible || DialogOpen)
             return;
         if (LogLayer.Visibility == Visibility.Visible)
         {
