@@ -93,14 +93,14 @@
                     </TextBlock.Effect>
                 </TextBlock>
 
+                <!-- Title screen of TOPMENU.SCN: TITLE.S25 buttons over its background -->
+                <Canvas x:Name="TitleLayer" Visibility="Collapsed" Background="Transparent"/>
+
                 <!-- Backlog page: SYSTEM.S25 slot 900 with its TOP / END bar -->
                 <Canvas x:Name="LogLayer" Visibility="Collapsed" Background="Transparent"/>
 
                 <!-- OPTION page: SYSTEM.S25 slot 1000 -->
                 <Canvas x:Name="OptionLayer" Visibility="Collapsed" Background="Black"/>
-
-                <!-- Title screen of TOPMENU.SCN: TITLE.S25 buttons over its background -->
-                <Canvas x:Name="TitleLayer" Visibility="Collapsed" Background="Transparent"/>
 
                 <!-- SAVE / LOAD pages -->
                 <Canvas x:Name="SaveLayer" Visibility="Collapsed" Background="Black"/>
