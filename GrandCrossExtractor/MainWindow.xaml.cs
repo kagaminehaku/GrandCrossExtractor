@@ -121,7 +121,7 @@ public partial class MainWindow : Window
 
                 BtnExtractSelected.IsEnabled = true;
                 BtnExtractAll.IsEnabled = true;
-                BtnPlayStory.IsEnabled = StoryFlow.For(warc.SchemeName) != null;
+                BtnPlayStory.IsEnabled = StoryPlayer.Supports(warc.SchemeName);
 
                 ApplyFilter();
                 return;
@@ -552,8 +552,7 @@ public partial class MainWindow : Window
         if (m_currentArchive == null || m_currentArchivePath == null)
             return;
         var scheme = GetSelectedScheme() ?? FormatManager.Instance.GetScheme(m_currentArchive.SchemeName);
-        var flow = scheme != null ? StoryFlow.For(scheme.Name) : null;
-        if (scheme == null || flow == null)
+        if (scheme == null || !StoryPlayer.Supports(scheme.Name))
         {
             MessageBox.Show(this, "Play Story does not know this game's story yet. It is available for: Oreimo Plus.",
                 "Play Story", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -567,7 +566,17 @@ public partial class MainWindow : Window
         try
         {
             var data = await Task.Run(() => GameData.Open(folder, scheme));
-            new PlayerWindow(data, flow) { Owner = this }.Show();
+            PlayerWindow window;
+            try
+            {
+                window = new PlayerWindow(data) { Owner = this };
+            }
+            catch
+            {
+                data.Dispose();
+                throw;
+            }
+            window.Show();
         }
         catch (Exception ex)
         {

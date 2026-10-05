@@ -20,7 +20,7 @@ public partial class PlayerWindow
         if (m_data.GetSystemFrame(question) == null)
         {
             string text = question == QuitQuestion ? "Quit the game?" : "Return to the title screen?";
-            return Task.FromResult(MessageBox.Show(this, text, m_flow.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK);
+            return Task.FromResult(MessageBox.Show(this, text, m_player.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK);
         }
         m_dialog?.TrySetResult(false);
         var answer = m_dialog = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

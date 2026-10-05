@@ -70,6 +70,7 @@ public sealed class ScnMachine
     private int m_stackTop = StackBase, m_namedTop = NamedBase;
     private int m_caseValue;
     private int m_clock;
+    private List<(int Address, Instruction Ins)>? m_walked;
 
     public ScnMachine(byte[] code)
     {
@@ -666,20 +667,21 @@ public sealed class ScnMachine
     }
 
     /// <summary>
-    /// The scenario files in code order with the scene number set before each ("mov n, @b[250]"),
-    /// found by following the code from the start.
+    /// Every instruction that can be decoded by following the code from the start, in address
+    /// order. Code after a jump or an end is tried too: it is reached through tables (the b[250]
+    /// scene table at the start) or is data, where an undecodable byte stops that path.
     /// </summary>
-    public List<(int Address, string File, int Scene)> FindScenes()
+    private List<(int Address, Instruction Ins)> Walk()
     {
-        var found = new List<(int, string, int)>();
+        if (m_walked != null)
+            return m_walked;
+        var found = m_walked = new List<(int, Instruction)>();
         var seen = new HashSet<int>();
         var work = new Stack<int>();
         work.Push(0);
         while (work.Count > 0)
         {
             int pc = work.Pop();
-            int scene = -1;
-            string? file = null;
             while (pc >= 0 && pc + 1 < m_code.Length && seen.Add(pc))
             {
                 Instruction ins;
@@ -691,17 +693,8 @@ public sealed class ScnMachine
                 {
                     break;
                 }
+                found.Add((pc, ins));
                 var a = ins.Args;
-                if (ins.Op == 0x038E && a[1].Kind == Kind.Variable && a[1].Space == 'b' && a[1].Value == 250 && a[0].Kind == Kind.Constant)
-                    scene = a[0].Value;
-                else if (ins.Op == 0x02D5 && a[0].Kind == Kind.String && a[1].Kind == Kind.Name && a[1].Text == "filename")
-                    file = ReadString(a[0].Value);
-                else if (ins.Op == 0x0267 && a[0].Kind == Kind.Constant && a[0].Value == 240 && file != null)
-                {
-                    found.Add((pc, file, scene));
-                    file = null;
-                }
-
                 foreach (int t in ins.Targets)
                     work.Push(t);
                 if (ins.Op == 0x01F4)
@@ -717,8 +710,6 @@ public sealed class ScnMachine
                     work.Push(a[0].Value);
                 if (ins.Op == 0x0258 && a[0].Kind == Kind.Constant)
                     work.Push(a[0].Value);
-                // Code after a jump or the end is reached through tables (the b[250] scene table
-                // at the start) or is data; try it, an undecodable byte stops that path
                 if (ins.Op is 0x0000 or 0x0001 or 0x000D or 0x0209 or 0x0259 or 0x026C or 0x026D or 0x0258)
                 {
                     work.Push(pc + ins.Length);
@@ -729,6 +720,81 @@ public sealed class ScnMachine
         }
         found.Sort((x, y) => x.Item1.CompareTo(y.Item1));
         return found;
+    }
+
+    /// <summary>
+    /// The scenario files in code order with the scene number set before each ("mov n, @b[250]");
+    /// Address is that of the "gosub 240" that plays the file.
+    /// </summary>
+    public List<(int Address, string File, int Scene)> FindScenes()
+    {
+        var found = new List<(int, string, int)>();
+        int scene = -1;
+        string? file = null;
+        foreach (var (pc, ins) in Walk())
+        {
+            var a = ins.Args;
+            if (ins.Op == 0x038E && a[1].Kind == Kind.Variable && a[1].Space == 'b' && a[1].Value == 250 && a[0].Kind == Kind.Constant)
+                scene = a[0].Value;
+            else if (ins.Op == 0x02D5 && a[0].Kind == Kind.String && a[1].Kind == Kind.Name && a[1].Text == "filename")
+                file = ReadString(a[0].Value);
+            else if (ins.Op == 0x0267 && a[0].Kind == Kind.Constant && a[0].Value == 240 && file != null)
+            {
+                found.Add((pc, file, scene));
+                file = null;
+            }
+        }
+        return found;
+    }
+
+    /// <summary>The route menu: its options, and where each route's code starts and ends.</summary>
+    public sealed record RouteMenu(int Address, string[] Options, int[] Starts, int[] Ends)
+    {
+        /// <summary>The route whose code holds <paramref name="address"/>, or -1.</summary>
+        public int RouteAt(int address)
+        {
+            for (int r = 0; r < Starts.Length; r++)
+                if (address >= Starts[r] && address < Ends[r])
+                    return r;
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// The route menu of the flow (Oreimo: 0x24D): the choice "callmod 0,203,#5, mode, ?, table,
+    /// kind, mask" whose mask of played options is a variable (a[780]). Its table comes from the
+    /// "mov table, @p" before it, its routes from the switch after it (option i jumps to target
+    /// i), and each route ends with the goto back to the loop before the menu. Null when the flow
+    /// has no such menu.
+    /// </summary>
+    public RouteMenu? FindRouteMenu()
+    {
+        var code = Walk();
+        for (int i = 0; i < code.Count; i++)
+        {
+            var (at, ins) = code[i];
+            var a = ins.Args;
+            if (ins.Op != 0x0283 || a.Length < 7 || a[1].Kind != Kind.Constant || a[1].Value != 203 || a[6].Kind != Kind.Variable)
+                continue;
+
+            int table = -1;
+            for (int j = i - 1; j >= Math.Max(0, i - 4) && table < 0; j--)
+            {
+                var set = code[j].Ins;
+                if (set.Op == 0x038E && set.Args[0].Kind == Kind.Constant && set.Args[1].Kind == Kind.Name && set.Args[1].Text == a[4].Text)
+                    table = set.Args[0].Value;
+            }
+            var routes = code.Skip(i + 1).Select(c => c.Ins).FirstOrDefault(c => c.Op == 0x0259);
+            if (table < 0 || routes == null)
+                continue;
+
+            var starts = routes.Targets;
+            var ends = starts.Select(start => code
+                .Where(c => c.Address > start && c.Ins.Op == 0x0258 && c.Ins.Args[0].Kind == Kind.Constant && c.Ins.Args[0].Value < at)
+                .Select(c => c.Address).DefaultIfEmpty(start).First()).ToArray();
+            return new RouteMenu(at, ReadChoices(table), starts, ends);
+        }
+        return null;
     }
 
     /// <summary>The options of a choice table (callmod 203): a count byte, then zero-terminated texts.</summary>

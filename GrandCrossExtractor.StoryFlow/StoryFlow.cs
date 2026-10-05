@@ -1,6 +1,11 @@
-// Order in which a game plays its scenario files and the choices between them. The engine
-// keeps this in SRC_MAIN.SCN; the flows here were read from its disassembly
+// Order in which a game plays its scenario files and the choices between them, written by hand.
+// The engine keeps this in SRC_MAIN.SCN; the flows here were read from its disassembly
 // (docs/engine-notes.md, section 5).
+//
+// Kept aside: Play Story now runs SRC_MAIN.SCN itself (StoryPlayer, ScnMachine) and reads its
+// chapters from it (StoryOutline), so nothing uses this project. The runner that played a
+// StoryFlow (StoryPlayer.RunStoryFlowAsync, for games without SRC_MAIN) is in the history of
+// GrandCrossExtractor.Engine/Player/StoryPlayer.cs, before this file moved here.
 
 namespace GrandCrossExtractor.Player;
 

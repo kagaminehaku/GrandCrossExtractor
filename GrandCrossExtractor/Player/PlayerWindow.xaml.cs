@@ -18,7 +18,6 @@ namespace GrandCrossExtractor.Player;
 public partial class PlayerWindow : Window, IStoryView
 {
     private readonly GameData m_data;
-    private readonly StoryFlow m_flow;
     private readonly Stage m_stage;
     private readonly StoryPlayer m_player;
 
@@ -32,21 +31,21 @@ public partial class PlayerWindow : Window, IStoryView
     // The message window was hidden by the user (right click); the next click shows it again
     private bool m_userHidWindow;
 
-    public PlayerWindow(GameData data, StoryFlow flow)
+    /// <summary>Plays the story of the game in <paramref name="data"/>, which the window then owns.</summary>
+    public PlayerWindow(GameData data)
     {
         InitializeComponent();
         m_data = data;
-        m_flow = flow;
         m_stage = new Stage(StageCanvas);
-        m_player = new StoryPlayer(data, flow, m_stage, this, new AudioEngine(new WaveOutput()));
+        m_player = new StoryPlayer(data, m_stage, this, new AudioEngine(new WaveOutput()));
 
-        Title = $"Play Story - {flow.Title}";
-        TxtTitle.Text = flow.Title;
-        TxtSubtitle.Text = "Reads the game's own scenario files. Character animations, screen effects and some transitions " +
-                           "are approximations of the engine's. Saving is not supported: use the chapter list to come back.";
+        Title = $"Play Story - {m_player.Title}";
+        TxtTitle.Text = m_player.Title;
+        TxtSubtitle.Text = "Plays the story from the game's own files: its flow script SRC_MAIN.SCN and scenario files, " +
+                           "with the engine's effects, saves and settings.";
 
-        var chapters = new ListCollectionView(flow.GetChapters(data.ScriptTitle).ToList());
-        chapters.GroupDescriptions.Add(new PropertyGroupDescription(nameof(StoryFlow.Chapter.Group)));
+        var chapters = new ListCollectionView(m_player.Outline.GetChapters(data.ScriptTitle).ToList());
+        chapters.GroupDescriptions.Add(new PropertyGroupDescription(nameof(StoryChapter.Group)));
         ChapterList.ItemsSource = chapters;
 
         var window = data.GetSystemFrame(0);
@@ -183,7 +182,7 @@ public partial class PlayerWindow : Window, IStoryView
 
     private void ChapterList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (ChapterList.SelectedItem is StoryFlow.Chapter chapter)
+        if (ChapterList.SelectedItem is StoryChapter chapter)
             Start(chapter.File);
     }
 
@@ -319,7 +318,7 @@ public partial class PlayerWindow : Window, IStoryView
             case Key.Enter:
             case Key.Space:
             case Key.PageDown:
-                if (MenuLayer.Visibility == Visibility.Visible && key == Key.Enter && ChapterList.SelectedItem is StoryFlow.Chapter chapter)
+                if (MenuLayer.Visibility == Visibility.Visible && key == Key.Enter && ChapterList.SelectedItem is StoryChapter chapter)
                     Start(chapter.File);
                 else
                     Advance();

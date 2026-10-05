@@ -1,6 +1,6 @@
-// The story engine: runs a game's flow (SRC_MAIN.SCN, or a StoryFlow) and its scenario commands
-// on an IStage, with the sound, the auto / skip modes, the backlog, settings and saves. The front
-// end shows the message window and the choices (IStoryView) and passes the clicks on. Command
+// The story engine: runs a game's flow script SRC_MAIN.SCN and its scenario commands on an
+// IStage, with the sound, the auto / skip modes, the backlog, settings and saves. The front end
+// shows the message window and the choices (IStoryView) and passes the clicks on. Command
 // meanings come from START.SCN and EFCLIB.SCN; see docs/engine-notes.md, section 8.
 
 using System.Text.RegularExpressions;
@@ -42,23 +42,37 @@ public sealed record LogEntry(string Speaker, string Text, string? Voice);
 public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
 {
     private readonly GameData m_data;
-    private readonly StoryFlow m_flow;
     private readonly IStage m_stage;
     private readonly IStoryView m_view;
     private readonly AudioEngine m_audio;
 
-    public StoryPlayer(GameData data, StoryFlow flow, IStage stage, IStoryView view, AudioEngine audio)
+    // The game's flow script SRC_MAIN.SCN, and the chapters read from it
+    private readonly byte[] m_flowCode;
+    private StoryOutline? m_outline;
+
+    /// <summary>
+    /// Games whose story the player shows like the game does. The title screen, the choice
+    /// pictures and the SYSTEM.S25 pages are Oreimo Plus's for now.
+    /// </summary>
+    public static bool Supports(string schemeName) => schemeName.Equals("Oreimo Plus", StringComparison.OrdinalIgnoreCase);
+
+    public StoryPlayer(GameData data, IStage stage, IStoryView view, AudioEngine audio)
     {
+        m_flowCode = data.Read("SRC_MAIN.SCN", ".SCN") ?? throw new InvalidDataException("The game has no SRC_MAIN.SCN.");
         m_data = data;
-        m_flow = flow;
         m_stage = stage;
         m_view = view;
         m_audio = audio;
     }
 
     public GameData Data => m_data;
-    public StoryFlow Flow => m_flow;
     public AudioEngine Audio => m_audio;
+
+    /// <summary>The game's name, for titles.</summary>
+    public string Title => m_data.SchemeName;
+
+    /// <summary>The opening, the routes and the ending as SRC_MAIN lays them out.</summary>
+    public StoryOutline Outline => m_outline ??= StoryOutline.Read(m_flowCode);
 
     // The token of the run that this code belongs to. It flows with the async calls, so a run that
     // was replaced keeps its own cancelled token and stops instead of taking on the new one.
@@ -235,18 +249,10 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
 
     #endregion
 
-    // Variables of a run without a flow script (_D710 ...); with one they are its a[]
-    private readonly Dictionary<int, int> m_vars = new();
+    // The variables of the scenario files (_D710 ...) are the flow script's a[]
+    private int GetVar(int index) => m_machine?.GetA(index) ?? 0;
 
-    private int GetVar(int index) => m_machine != null ? m_machine.GetA(index) : m_vars.GetValueOrDefault(index);
-
-    private void SetVar(int index, int value)
-    {
-        if (m_machine != null)
-            m_machine.SetA(index, value);
-        else
-            m_vars[index] = value;
-    }
+    private void SetVar(int index, int value) => m_machine?.SetA(index, value);
 
     #region Flow
 
@@ -263,9 +269,7 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
     // Script line of the message shown last
     private int m_messageLine;
 
-    // The game's flow script SRC_MAIN.SCN and the interpreter running it (null: the StoryFlow)
-    private byte[]? m_flowCode;
-    private bool m_flowCodeRead;
+    // The interpreter running SRC_MAIN.SCN
     private ScnMachine? m_machine;
 
     // START.SCN function 203 draws picture choices from SYSTEM.S25 slot 400 (+10 per option)
@@ -275,23 +279,11 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
     private bool m_autoSave;
 
     /// <summary>
-    /// Plays the story: SRC_MAIN.SCN when the game has it, from the beginning, from a scenario
-    /// file (its scene number and route), or from the variables of a save.
+    /// Plays the story by running SRC_MAIN.SCN: from the beginning, from a scenario file (its
+    /// scene number and route), or from the variables of a save.
     /// </summary>
     public async Task RunAsync(string? startFile, int initialPlayed = 0, IReadOnlyDictionary<string, int>? vars = null)
     {
-        if (!m_flowCodeRead)
-        {
-            m_flowCodeRead = true;
-            m_flowCode = await Task.Run(() => m_data.Read("SRC_MAIN.SCN", ".SCN"));
-        }
-        if (m_flowCode == null)
-        {
-            m_machine = null;
-            await RunStoryFlowAsync(startFile, initialPlayed);
-            return;
-        }
-
         var machine = m_machine = new ScnMachine(m_flowCode);
         if (vars != null)
         {
@@ -304,22 +296,13 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
             if (scene.File == null)
                 throw new InvalidOperationException($"{startFile} is not in SRC_MAIN.SCN.");
             machine.SetB(250, scene.Scene);
-            machine.SetA(PlayedVar, RoutesPlayedAt(startFile, initialPlayed));
+            machine.SetA(PlayedVar, Outline.RoutesPlayedAt(startFile, initialPlayed));
         }
         await machine.RunAsync(this, m_token);
     }
 
     // a[780]: the routes played, a bit per option of the route menu
     private const int PlayedVar = 780;
-
-    /// <summary>The routes played when a file is started from the chapter list: its own route, or all for the ending.</summary>
-    private int RoutesPlayedAt(string file, int played)
-    {
-        for (int r = 0; r < m_flow.Routes.Count; r++)
-            if (RouteContains(m_flow.Routes[r], file))
-                return played | 1 << r;
-        return m_flow.Ending.Any(f => Same(f, file)) ? (1 << m_flow.Routes.Count) - 1 : played;
-    }
 
     private static string ScriptStem(string path) => System.IO.Path.GetFileNameWithoutExtension(path.Replace('\\', '/'));
 
@@ -341,86 +324,7 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
         return 0;
     }
 
-    private async Task RunStoryFlowAsync(string? startFile, int initialPlayed)
-    {
-        int all = (1 << m_flow.Routes.Count) - 1;
-        int played = m_played = initialPlayed;
-        bool started = startFile == null;
-
-        foreach (var file in m_flow.Opening)
-        {
-            started |= Same(file, startFile);
-            if (started)
-                await PlayScriptAsync(file);
-        }
-
-        if (!started)
-        {
-            for (int r = 0; r < m_flow.Routes.Count && !started; r++)
-            {
-                if (RouteContains(m_flow.Routes[r], startFile!))
-                {
-                    m_played = played |= 1 << r;
-                    started = true;
-                    await PlayRouteAsync(m_flow.Routes[r], startFile);
-                }
-            }
-        }
-        if (!started && m_flow.Ending.Any(f => Same(f, startFile)))
-            m_played = played = all;
-
-        while (played != all)
-        {
-            int route = await ChooseAsync(m_flow.Routes.Select(r => r.Title).ToList(), m_flow.MenuButtonSlot, played);
-            m_played = played |= 1 << route;
-            await PlayRouteAsync(m_flow.Routes[route], null);
-        }
-
-        foreach (var file in m_flow.Ending)
-        {
-            started |= Same(file, startFile);
-            if (started)
-                await PlayScriptAsync(file);
-        }
-    }
-
     private static bool Same(string a, string? b) => b != null && a.Equals(b, StringComparison.OrdinalIgnoreCase);
-
-    private static bool RouteContains(Route route, string file) =>
-        route.Steps.Any(s => s is PlayStep p ? Same(p.File, file) : s is ChoiceStep c && c.Branches.Any(b => b.Any(f => Same(f, file))));
-
-    private async Task PlayRouteAsync(Route route, string? from)
-    {
-        bool on = from == null;
-        foreach (var step in route.Steps)
-        {
-            if (step is PlayStep play)
-            {
-                on |= Same(play.File, from);
-                if (on)
-                    await PlayScriptAsync(play.File);
-            }
-            else if (step is ChoiceStep choice)
-            {
-                int branch;
-                int skipTo = 0;
-                if (on)
-                {
-                    branch = await ChooseAsync(choice.Options);
-                }
-                else
-                {
-                    branch = Array.FindIndex(choice.Branches, b => b.Any(f => Same(f, from)));
-                    if (branch < 0)
-                        continue;
-                    skipTo = Array.FindIndex(choice.Branches[branch], f => Same(f, from));
-                    on = true;
-                }
-                foreach (var file in choice.Branches[branch].Skip(skipTo))
-                    await PlayScriptAsync(file);
-            }
-        }
-    }
 
     private async Task PlayScriptAsync(string file)
     {
@@ -431,10 +335,6 @@ public sealed class StoryPlayer : ScnMachine.IHost, IDisposable
             // b[160] asks for an auto save at the file's first message
             m_autoSave = m_restoreTo < 0 && m_machine.GetB(160) != 0;
             m_machine.SetB(160, 0);
-        }
-        else
-        {
-            m_autoSave = m_restoreTo < 0 && !Same(file, m_flow.Opening.FirstOrDefault());
         }
         var script = await Task.Run(() => m_data.LoadScript(file)).WaitAsync(m_token)
             ?? throw new InvalidOperationException($"The scenario file {file} is missing.");

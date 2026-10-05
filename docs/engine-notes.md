@@ -175,11 +175,15 @@ archives of the game folder. It is split in two projects:
   `IStage` and `IStoryView`, so another front end (another platform) can reuse all of it.
 - `GrandCrossExtractor` (WPF): the extractor window and the player's screens.
 
+The story runs from the game's own SRC_MAIN.SCN only. The hand-written Oreimo flow that came
+before it (`StoryFlow.cs`) is kept aside in a third project, `GrandCrossExtractor.StoryFlow`,
+which nothing uses.
+
 | File | Role |
 |---|---|
 | Engine `Player/StoryPlayer.cs` | the story engine: flow, scenario command interpreter, auto / skip / Ctrl, backlog, settings, saves and auto saves, save thumbnails, title sequence |
 | Engine `Player/ScnMachine.cs` | interpreter for SRC_MAIN.SCN (the story order of any game): variables, expressions, jumps, switch / case, local calls; gosub 240 and callmod 203 go to StoryPlayer |
-| Engine `Player/StoryFlow.cs` | the chapter list (hand-written for Oreimo; the story itself runs from SRC_MAIN) |
+| Engine `Player/StoryOutline.cs` | the chapter list read from SRC_MAIN: files before the route menu = opening, the route menu's options and its switch targets = the routes (each ends at the goto back to the menu loop), the rest = ending |
 | Engine `Player/ScenarioScript.cs` | TXT parser |
 | Engine `Player/GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
 | Engine `Player/IStage.cs` | what the screen must do: planes, the action queue, DRAW / DRAW_EX, effects, scroll, movie |

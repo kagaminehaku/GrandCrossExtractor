@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Hand-written story flows (Oreimo Plus), kept aside for later: Play Story reads the flow
+       from the game's SRC_MAIN.SCN instead. Built with the solution so it stays compilable,
+       but no other project uses it. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrandCrossExtractor</RootNamespace>
+  </PropertyGroup>
+
+</Project>
