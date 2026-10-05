@@ -39,6 +39,9 @@ looked up in `MONTBL.BIN` (in `_T`) *(verified)*:
   u32 with six 5-bit slot values (base, layers 1-5; 31 = layer off). All `FF` = unused code.
 - Oreimo: 101-107 = mouth 100 + eyes 200-206, 121-127 = the same with blush (300),
   151-157 / 171-177 = open mouth 101; 2xx = the same on the zoomed `kir_L.s25`.
+- Oreimo's scripts use only these codes (101-107 and 155, all on `KIR.S25`), never the `m` form,
+  so the extractor's "Compose layers" reads them through `MontageTable` too: 8 pictures of
+  `KIR.S25` instead of its 11 separate frames.
 
 About 3,700 eye/mouth frames are never used by any script combination. Possibly blink / lip-sync
 frames switched by the engine, or simply unused art - **unknown**.

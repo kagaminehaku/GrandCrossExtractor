@@ -24,9 +24,6 @@ public sealed record StageImage(PixelImage Image, int Left, int Top)
 /// </summary>
 public sealed record ThumbnailTables(string[] Pictures, string[] Movies, string[] Overlays);
 
-/// <summary>A layered picture chosen by an expression code (MONTBL.BIN): the S25 file and its slots.</summary>
-public sealed record Montage(string File, int[] Slots);
-
 public sealed class GameData : IDisposable
 {
     private const int CacheSize = 24;
@@ -41,7 +38,7 @@ public sealed class GameData : IDisposable
     private readonly object m_cacheLock = new();
     private readonly LinkedList<(string Key, List<S25Frame> Frames)> m_frameCache = new();
 
-    private byte[]? m_montageTable;
+    private MontageTable? m_montageTable;
     private Dictionary<string, int>? m_nameWindows;
     private Dictionary<int, S25Frame>? m_system;
     private ThumbnailTables? m_thumbnailTables;
@@ -277,38 +274,12 @@ public sealed class GameData : IDisposable
 
     /// <summary>
     /// Picture for an expression code of "$L_MONT,plane,,x,y,?,M,code", from MONTBL.BIN.
-    /// Each entry is 8 bytes: u16 offset of the S25 name in the string table at the end,
-    /// u16 offset of a face picture name, then six 5-bit slot values (base and layers 1-5,
-    /// 31 = layer off). Null when the code is not in the table.
+    /// Null when the code is not in the table.
     /// </summary>
     public Montage? GetMontage(int code)
     {
-        const int Entries = 100000;
-        m_montageTable ??= Read("MONTBL.BIN", ".BIN") ?? Array.Empty<byte>();
-        var table = m_montageTable;
-        int stringBase = Entries * 8;
-        if (code < 0 || code >= Entries || table.Length <= stringBase || code * 8 + 8 > stringBase)
-            return null;
-
-        int at = code * 8;
-        ushort nameOffset = BitConverter.ToUInt16(table, at);
-        uint packed = BitConverter.ToUInt32(table, at + 4);
-        if (nameOffset == 0xFFFF || stringBase + nameOffset >= table.Length)
-            return null;
-
-        int end = Array.IndexOf(table, (byte)0, stringBase + nameOffset);
-        if (end < 0)
-            end = table.Length;
-        string file = Encodings.cp932.GetString(table, stringBase + nameOffset, end - stringBase - nameOffset);
-
-        var slots = new List<int>();
-        for (int k = 0; k < 6; k++)
-        {
-            int v = (int)(packed >> (k * 5)) & 31;
-            if (v != 31)
-                slots.Add(k * 100 + v);
-        }
-        return new Montage(file, slots.ToArray());
+        m_montageTable ??= new MontageTable(Read("MONTBL.BIN", ".BIN") ?? Array.Empty<byte>());
+        return m_montageTable.Get(code);
     }
 
     /// <summary>

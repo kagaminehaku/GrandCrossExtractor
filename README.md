@@ -43,7 +43,7 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   Turn it off to save the raw decrypted files instead.
 - **Compose layers** (off by default, needs Convert on extract):
   - Event CGs and character sprites are stored as a base picture plus separate eyes, mouth and effect layers. With this option each layered S25 is saved as the complete pictures the game shows instead of its separate frames.
-  - The combinations come from the game's scenario scripts (the `.TXT` files in `*_T.WAR`), so that archive has to be in the same folder as the one you extract.
+  - The combinations come from the game's scenario scripts (the `.TXT` files in `*_T.WAR`), so that archive has to be in the same folder as the one you extract. Oreimo Plus picks its character expressions by number; those come from the expression table `MONTBL.BIN` in the same archive.
   - Files are named after the frames they combine, for example `ST_SENA@001+101+201.png`.
   - The few layered images the scripts never show are saved as separate frames.
 - **▶ Play Story** (Oreimo Plus for now):
