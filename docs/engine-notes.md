@@ -43,8 +43,11 @@ looked up in `MONTBL.BIN` (in `_T`) *(verified)*:
   so the extractor's "Compose layers" reads them through `MontageTable` too: 8 pictures of
   `KIR.S25` instead of its 11 separate frames.
 
-About 3,700 eye/mouth frames are never used by any script combination. Possibly blink / lip-sync
-frames switched by the engine, or simply unused art - **unknown**.
+About 3,700 eye/mouth frames of the other games are never used by any script combination.
+Possibly blink / lip-sync frames switched by the engine, or simply unused art - **unknown**.
+Oreimo has none: its only expression sprite `KIR.S25` has 11 frames (base, mouths 100 / 101,
+eyes 200-206, blush 300), and the 8 expression codes its scripts use cover all of them; the open
+mouth is chosen by the script (code 155), not switched by the engine.
 
 ## 3. Scenario TXT
 
@@ -161,8 +164,10 @@ data), START 54 %, TOPMENU 56 % - START and TOPMENU still have unhandled special
    result `g$sel` goes to `a[990]`, `eval "_D780|(1<<_D990)"` marks it, `switch` jumps to the route.
 4. Each route runs `oreNN-01/-02/-03.txt` and returns to the menu. Routes 04, 06, 07 have a
    choice 中に出す / 外に出す after `-02` leading to `-02b` / `-02c` (`-02d` also exists).
-5. When `a[780] == 255`: `ore10.txt` (ending), staff roll (`staff0-5.s25` + `vor02-07.ogv`,
-   native-code effect), then back to `topmenu.scn`.
+5. When `a[780] == 255`: `ore10.txt` (ending), then back to `topmenu.scn`. The staff roll is
+   part of `ore10.txt` itself (`e\staff_1-5.s25` with `$WAIT` and the music `m\oreplus_02`,
+   then a click wait). The staff roll code in SRC_MAIN (L_02080: `staff0-5.s25`,
+   `vor0x.ogv`, "staff.asm") is never called: it is a template shared by the engine's games.
 
 ## 6. Play Story - status
 
@@ -196,8 +201,9 @@ which nothing uses.
 | WPF `Player/WaveOutput.cs` | `IAudioOutput` on the Windows sound device (NAudio.WinMM) |
 | WPF `Player/PlayerWindow.*` | `IStoryView`: title buttons, message window and its button bar, choices, chapter list, input (`.Save` save / load pages, `.Option` OPTION page and backlog page, `.Dialog` YES / NO dialog) |
 
-Command behaviour and the screens follow section 8. Not done: ruby, the engine's own lip sync /
-blinking, other games' flows (each needs its SRC_MAIN read).
+Command behaviour and the screens follow section 8. Oreimo needs no ruby (its scripts have no
+ruby text; START.SCN loads `d\ruby.s25`, 165 small kana, for games that do) and no automatic
+lip sync / blinking (section 2). Other games: see section 9.
 
 ## 7. Tools
 
