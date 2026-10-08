@@ -99,6 +99,7 @@ public partial class MainWindow : Window
             m_currentArchive = null;
             m_currentArchivePath = null;
             m_standaloneFrames = null;
+            BtnRepack.IsEnabled = false;
 
             m_lastAttemptedPath = path;
             var arcView = new ArcView(path);
@@ -121,6 +122,7 @@ public partial class MainWindow : Window
 
                 BtnExtractSelected.IsEnabled = true;
                 BtnExtractAll.IsEnabled = true;
+                BtnRepack.IsEnabled = true;
                 BtnPlayStory.IsEnabled = StoryPlayer.Supports(warc.SchemeName);
 
                 ApplyFilter();
@@ -780,6 +782,7 @@ public partial class MainWindow : Window
         BtnOpen.IsEnabled = false;
         BtnExtractSelected.IsEnabled = false;
         BtnExtractAll.IsEnabled = false;
+        BtnRepack.IsEnabled = false;
         CmbScheme.IsEnabled = false;
 
         var archive = m_currentArchive;
@@ -869,8 +872,99 @@ public partial class MainWindow : Window
         BtnOpen.IsEnabled = true;
         BtnExtractSelected.IsEnabled = true;
         BtnExtractAll.IsEnabled = true;
+        BtnRepack.IsEnabled = m_currentArchive != null;
         CmbScheme.IsEnabled = true;
         TxtStatusArchive.Text = $"Archive: {Path.GetFileName(m_currentArchivePath ?? "")}";
+    }
+
+    /// <summary>
+    /// Repack: the files of a folder whose names are entries of the open archive (as Extract writes
+    /// them with "Convert on extract" off) are packed and encrypted again into a new .WAR; the
+    /// other entries are copied as they are. The new archive is written to a temporary file first,
+    /// then every packed entry is read back from it and compared with its file.
+    /// </summary>
+    private async void BtnRepack_Click(object sender, RoutedEventArgs e)
+    {
+        if (m_currentArchive == null || m_currentArchivePath == null || m_extracting)
+            return;
+        var folder = new OpenFolderDialog
+        {
+            Title = "Choose the folder with the edited files (extracted with 'Convert on extract' off)",
+        };
+        if (folder.ShowDialog(this) != true)
+            return;
+        var save = new SaveFileDialog
+        {
+            Title = "Save the new archive",
+            FileName = Path.GetFileName(m_currentArchivePath),
+            Filter = "ShiinaRio archive (*.war)|*.war|All files (*.*)|*.*",
+        };
+        if (save.ShowDialog(this) != true)
+            return;
+        string target = Path.GetFullPath(save.FileName);
+        if (string.Equals(target, Path.GetFullPath(m_currentArchivePath), StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(this,
+                "The open archive cannot be overwritten while it is read from.\n\n" +
+                "Save the new archive somewhere else, close it here, then put it in place of the old one.",
+                "Repack", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var archive = m_currentArchive;
+        string source = folder.FolderName, temporary = target + ".tmp";
+        m_extracting = true;
+        BtnOpen.IsEnabled = false;
+        BtnExtractSelected.IsEnabled = false;
+        BtnExtractAll.IsEnabled = false;
+        BtnRepack.IsEnabled = false;
+        CmbScheme.IsEnabled = false;
+        ProgExtraction.Visibility = Visibility.Visible;
+        ProgExtraction.Value = 0;
+        ProgExtraction.Maximum = archive.Entries.Count;
+        var progress = new Progress<(int Current, int Total, string Name)>(p =>
+        {
+            ProgExtraction.Value = p.Current;
+            TxtStatusArchive.Text = $"Repacking: {p.Name} ({p.Current}/{p.Total})...";
+        });
+        int replaced = 0;
+        var wrong = new List<string>();
+        string? error = null;
+        try
+        {
+            replaced = await Task.Run(() => WarcPacker.Repack(archive, source, temporary, progress));
+            TxtStatusArchive.Text = "Checking the new archive...";
+            wrong = await Task.Run(() => WarcPacker.Verify(temporary, archive, source));
+            if (wrong.Count == 0)
+                File.Move(temporary, target, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+        EndExtraction();
+
+        if (error != null)
+            MessageBox.Show(this, $"Repacking failed: {error}", "Repack", MessageBoxButton.OK, MessageBoxImage.Error);
+        else if (wrong.Count > 0)
+            MessageBox.Show(this,
+                $"The new archive was not saved: {wrong.Count} entries did not read back as their files.\n\n" +
+                string.Join("\n", wrong.Take(15)),
+                "Repack", MessageBoxButton.OK, MessageBoxImage.Error);
+        else if (replaced == 0)
+            MessageBox.Show(this,
+                $"No file in\n{source}\nhas the name of an entry of this archive, so the new archive is a copy of it.\n\n" +
+                "Extract with 'Convert on extract' off, edit those files and keep their names.",
+                "Repack", MessageBoxButton.OK, MessageBoxImage.Information);
+        else
+            MessageBox.Show(this,
+                $"Packed {replaced} edited files; the other {archive.Entries.Count - replaced} entries were copied as they were.\n\nSaved to:\n{target}",
+                "Repack Complete", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     #endregion

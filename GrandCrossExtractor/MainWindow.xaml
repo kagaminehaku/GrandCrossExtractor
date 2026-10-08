@@ -245,6 +245,8 @@
                     <Button x:Name="BtnOpen" Content="📁 Open Archive..." Style="{StaticResource AccentBtn}" Margin="4,0" Click="BtnOpen_Click" ToolTip="Open .WAR, .WARC, or .S25 Archive"/>
                     <Button x:Name="BtnExtractSelected" Content="💾 Extract Selected" Style="{StaticResource ModernBtn}" Margin="4,0" Click="BtnExtractSelected_Click" IsEnabled="False"/>
                     <Button x:Name="BtnExtractAll" Content="📦 Extract All" Style="{StaticResource ModernBtn}" Margin="4,0" Click="BtnExtractAll_Click" IsEnabled="False"/>
+                    <Button x:Name="BtnRepack" Content="🔁 Repack..." Style="{StaticResource ModernBtn}" Margin="4,0" Click="BtnRepack_Click" IsEnabled="False"
+                            ToolTip="Pack edited files into a new .WAR: extract with 'Convert on extract' off, edit the files, then choose that folder"/>
                     <Button x:Name="BtnPlayStory" Content="▶ Play Story" Style="{StaticResource ModernBtn}" Margin="4,0" Click="BtnPlayStory_Click" IsEnabled="False"
                             ToolTip="Read the game's story with its pictures, voices and music, straight from the archives of this game folder. Available for: Oreimo Plus."/>
                     <CheckBox x:Name="ChkConvert" Content="Convert on extract" IsChecked="True" Foreground="#C0C0D0" VerticalAlignment="Center" Margin="10,0,0,0"

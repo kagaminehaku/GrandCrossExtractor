@@ -324,9 +324,24 @@ public class JokersCrypt : IDecryptExtra
         }
     }
 
+    /// <summary>
+    /// The reverse of the 0x204 step for packing: the length XOR at 0x200 (its own reverse). The
+    /// first 0x200 bytes stay as they are: Decrypt range-decodes them only when they start with
+    /// the 0x718E958D mark, so data that does not is read back unchanged.
+    /// </summary>
     public void Encrypt(byte[] data, int index, uint length, uint flags)
     {
-        // Not used for extraction
+        if (length < 0x400)
+            return;
+        if ((flags & 0x104) == 0x104)
+        {
+            if (0x718E958D == LittleEndian.ToUInt32(data, index))
+                throw new NotSupportedException("The data starts with the mark of a range-coded block, which this packer does not write.");
+            data[index + 0x200] ^= (byte)length;
+            data[index + 0x201] ^= (byte)(length >> 8);
+            data[index + 0x202] ^= (byte)(length >> 16);
+            data[index + 0x203] ^= (byte)(length >> 24);
+        }
     }
 }
 
