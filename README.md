@@ -41,6 +41,12 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   - PAD becomes WAV.
 
   Turn it off to save the raw decrypted files instead.
+- **🔁 Repack** (for mods and translations): packs edited files back into a new `.WAR` that the game reads.
+  - Extract with **Convert on extract** off, edit the files and keep their names, then with the original archive open click **🔁 Repack...**, choose the folder with the edited files and where to save the new archive.
+  - Entries with a file of the same name in that folder are compressed and encrypted again; the others are copied byte for byte. Put only the files you changed in the folder: the packer's compression is a little weaker than the original's, so repacking everything makes the archive slightly larger.
+  - Before the new archive is saved, every packed entry is read back from it and compared with its file; nothing is written if one differs. The open archive itself cannot be overwritten: save elsewhere, close it, then put the new file in its place (keep a copy of the original).
+  - Checked on all 59 archives of the 11 games (every entry reads back the same), and Azu Plus and Oreimo Plus with repacked archives play the same as the originals in [OpenShiina](https://github.com/kagaminehaku/OpenShiina).
+  - Scenario `.TXT` files are Shift-JIS: the games cannot show characters that Shift-JIS lacks. Images cannot be repacked from PNG (there is no S25 encoder).
 - **Compose layers** (off by default, needs Convert on extract):
   - Event CGs and character sprites are stored as a base picture plus separate eyes, mouth and effect layers. With this option each layered S25 is saved as the complete pictures the game shows instead of its separate frames.
   - The combinations come from the game's scenario scripts (the `.TXT` files in `*_T.WAR`), so that archive has to be in the same folder as the one you extract. Oreimo Plus picks its character expressions by number; those come from the expression table `MONTBL.BIN` in the same archive.
@@ -98,7 +104,7 @@ GARbro handles hundreds of engines. This project only covers Grand Cross games, 
 ## Limitations
 
 - Only WARC 1.7 archives are supported. That is the format every Grand Cross game uses.
-- The extractor cannot repack or modify archives.
+- Repacking takes the raw files only: S25 / MI4 pictures cannot be made from PNG yet.
 - Windows only.
 
 ## Credits
