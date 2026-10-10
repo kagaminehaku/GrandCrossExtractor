@@ -52,12 +52,6 @@ In total about 12,800 archive entries were decrypted, and each one was checked f
   - The combinations come from the game's scenario scripts (the `.TXT` files in `*_T.WAR`), so that archive has to be in the same folder as the one you extract. Oreimo Plus picks its character expressions by number; those come from the expression table `MONTBL.BIN` in the same archive.
   - Files are named after the frames they combine, for example `ST_SENA@001+101+201.png`.
   - The few layered images the scripts never show are saved as separate frames.
-- **▶ Play Story** (Oreimo Plus for now):
-  - Open any archive of the game and click **▶ Play Story** to play the story with its pictures, voices, music, movies and choices, straight from the game folder.
-  - It looks and plays like the game: the opening and title screen, the message window with its buttons (quick save / load, auto, save, load, skip, option, title, quit), the save and load pages (with the game's thumbnails, and the AUTO page that keeps the last nine scene starts and the quick save), the YES / NO dialogs, the OPTION page (volumes, screen mode, message speed, auto wait, skip read text only) and the backlog.
-  - Animations, transitions and screen effects follow the engine's own scripts (START.SCN, EFCLIB.SCN).
-  - Keys: click / Enter = next, right click = hide the text or close a page, mouse wheel up = backlog, hold Ctrl = skip, A = auto, Esc = chapter list, F11 = full screen. Move the mouse to the top for a tool bar with the chapter list, which starts the story from any scenario file.
-  - Saves, settings and the messages read are kept in `%AppData%\GrandCrossExtractor`.
 
 ## Requirements
 
@@ -74,7 +68,7 @@ dotnet build -c Release
 
 The program is written to `bin/Release/GrandCrossExtractor/`. The build also copies the scheme data next to the executable: `Formats.Json` and the `ShiinaImage/` folder. The extractor needs both at run time.
 
-The solution has two main projects: `GrandCrossExtractor.Engine` holds the archive and image decoders and the story engine without any user interface, and `GrandCrossExtractor` is the Windows (WPF) application built on it. A third, `GrandCrossExtractor.StoryFlow`, keeps an older hand-written story flow aside and is not used by the program.
+The solution has two projects: `GrandCrossExtractor.Engine` holds the archive and image decoders without any user interface, and `GrandCrossExtractor` is the Windows (WPF) application built on it.
 
 ## Usage
 
@@ -111,7 +105,6 @@ GARbro handles hundreds of engines. This project only covers Grand Cross games, 
 
 - **[GARbro](https://github.com/morkt/GARbro)** by morkt: the original ShiinaRio archive, encryption and media format code, and the initial scheme data for several games. MIT License.
 - **[NVorbis](https://github.com/NVorbis/NVorbis)**: Ogg Vorbis decoding for audio preview. MIT License.
-- **[NAudio](https://github.com/naudio/NAudio)**: audio mixing for Play Story. MIT License.
 
 ## License
 

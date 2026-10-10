@@ -35,14 +35,9 @@
     <None Update="ShiinaImage\*.tail" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Archives, decoders and the story engine; this project adds the WPF screens -->
+  <!-- Archives and decoders; this project adds the WPF screens -->
   <ItemGroup>
     <ProjectReference Include="..\GrandCrossExtractor.Engine\GrandCrossExtractor.Engine.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Play Story: plays the engine's mixed sound on the Windows sound device -->
-    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
   </ItemGroup>
 
 </Project>

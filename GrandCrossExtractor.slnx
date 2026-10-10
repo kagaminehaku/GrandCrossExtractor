@@ -1,5 +1,4 @@
 <Solution>
   <Project Path="GrandCrossExtractor.Engine/GrandCrossExtractor.Engine.csproj" />
   <Project Path="GrandCrossExtractor/GrandCrossExtractor.csproj" />
-  <Project Path="GrandCrossExtractor.StoryFlow/GrandCrossExtractor.StoryFlow.csproj" />
 </Solution>

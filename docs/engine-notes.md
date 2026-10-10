@@ -1,7 +1,7 @@
 # ShiinaRio engine notes (GRAND†CROSS "Plus" games)
 
-Research notes for the extractor, the SCN tools (`tools/ScnTools`) and the **▶ Play Story**
-player. Facts marked *(verified)* were checked against all 11 games' data or the engine code;
+Research notes for the extractor and the SCN tools (`tools/ScnTools`).
+Facts marked *(verified)* were checked against all 11 games' data or the engine code;
 everything else is an inference and says so.
 
 ## 1. Archives
@@ -169,43 +169,7 @@ data), START 54 %, TOPMENU 56 % - START and TOPMENU still have unhandled special
    then a click wait). The staff roll code in SRC_MAIN (L_02080: `staff0-5.s25`,
    `vor0x.ogv`, "staff.asm") is never called: it is a template shared by the engine's games.
 
-## 6. Play Story - status
-
-Play Story plays Oreimo Plus from beginning to end (all 35 files, every choice), reading the
-archives of the game folder. It is split in two projects:
-
-- `GrandCrossExtractor.Engine` (`net10.0`, no WPF or Windows API): archives, decoders, the
-  story engine and its formulas. Pictures are `PixelImage` (plain BGRA / BGR pixels), sound
-  goes out through `IAudioOutput`, and the screen and the window around it are the interfaces
-  `IStage` and `IStoryView`, so another front end (another platform) can reuse all of it.
-- `GrandCrossExtractor` (WPF): the extractor window and the player's screens.
-
-The story runs from the game's own SRC_MAIN.SCN only. The hand-written Oreimo flow that came
-before it (`StoryFlow.cs`) is kept aside in a third project, `GrandCrossExtractor.StoryFlow`,
-which nothing uses.
-
-| File | Role |
-|---|---|
-| Engine `Player/StoryPlayer.cs` | the story engine: flow, scenario command interpreter, auto / skip / Ctrl, backlog, settings, saves and auto saves, save thumbnails, title sequence |
-| Engine `Player/ScnMachine.cs` | interpreter for SRC_MAIN.SCN (the story order of any game): variables, expressions, jumps, switch / case, local calls; gosub 240 and callmod 203 go to StoryPlayer |
-| Engine `Player/StoryOutline.cs` | the chapter list read from SRC_MAIN: files before the route menu = opening, the route menu's options and its switch targets = the routes (each ends at the goto back to the menu loop), the rest = ending |
-| Engine `Player/ScenarioScript.cs` | TXT parser |
-| Engine `Player/GameData.cs` | archives, lookup by stem, S25 cache, MONTBL / NWINTBL / SYSTEM.S25 |
-| Engine `Player/IStage.cs` | what the screen must do: planes, the action queue, DRAW / DRAW_EX, effects, scroll, movie |
-| Engine `Player/StageMath.cs` | the formulas of section 8: easings, A_CHR loops, rule fade / rule wipe levels, EFCLIB shake and zoom frames |
-| Engine `Player/MessageLayout.cs` | message text layout with the engine's font metrics and kinsoku |
-| Engine `Player/AudioEngine.cs` | NAudio mixer (NAudio.Core): BGM, voice, SE channels, loops, fades |
-| Engine `Player/SaveData.cs`, `PlayerConfig.cs` | saves, settings and messages read, in `%AppData%\GrandCrossExtractor` (`GCX_PLAYER_DATA` points them elsewhere, for tests) |
-| WPF `Player/Stage.cs` | `IStage` with WPF: 800x600 planes, snapshot-based DRAW / DRAW_EX, plane animations, scroll, movie (WPF MediaElement plays the MPEG-1 files) |
-| WPF `Player/MessageText.cs` | draws the message text and gaiji at `MessageLayout`'s positions |
-| WPF `Player/WaveOutput.cs` | `IAudioOutput` on the Windows sound device (NAudio.WinMM) |
-| WPF `Player/PlayerWindow.*` | `IStoryView`: title buttons, message window and its button bar, choices, chapter list, input (`.Save` save / load pages, `.Option` OPTION page and backlog page, `.Dialog` YES / NO dialog) |
-
-Command behaviour and the screens follow section 8. Oreimo needs no ruby (its scripts have no
-ruby text; START.SCN loads `d\ruby.s25`, 165 small kana, for games that do) and no automatic
-lip sync / blinking (section 2). Other games: see section 9.
-
-## 7. Tools
+## 6. Tools
 
 ```
 dotnet run --project tools/ScnTools -- opscan oreimoplus <OREIMOPLUS_dump_SCY.exe> ops.tsv

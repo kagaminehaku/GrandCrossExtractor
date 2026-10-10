@@ -11,7 +11,6 @@ using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using GrandCrossExtractor.Core;
 using GrandCrossExtractor.Formats;
-using GrandCrossExtractor.Player;
 using GrandCrossExtractor.UI;
 
 namespace GrandCrossExtractor;
@@ -123,12 +122,11 @@ public partial class MainWindow : Window
                 BtnExtractSelected.IsEnabled = true;
                 BtnExtractAll.IsEnabled = true;
                 BtnRepack.IsEnabled = true;
-                BtnPlayStory.IsEnabled = StoryPlayer.Supports(warc.SchemeName);
 
                 ApplyFilter();
                 return;
             }
-            BtnPlayStory.IsEnabled = false;
+
 
             // Check if it's a standalone S25 file
             byte[] header = arcView.View.ReadBytes(0, 8);
@@ -547,52 +545,7 @@ public partial class MainWindow : Window
         return sb.ToString();
     }
 
-    #region Play Story
 
-    private async void BtnPlayStory_Click(object sender, RoutedEventArgs e)
-    {
-        if (m_currentArchive == null || m_currentArchivePath == null)
-            return;
-        var scheme = GetSelectedScheme() ?? FormatManager.Instance.GetScheme(m_currentArchive.SchemeName);
-        if (scheme == null || !StoryPlayer.Supports(scheme.Name))
-        {
-            MessageBox.Show(this, "Play Story does not know this game's story yet. It is available for: Oreimo Plus.",
-                "Play Story", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        string folder = Path.GetDirectoryName(Path.GetFullPath(m_currentArchivePath))!;
-        BtnPlayStory.IsEnabled = false;
-        string previous = TxtStatusArchive.Text;
-        TxtStatusArchive.Text = "Opening the game's archives...";
-        try
-        {
-            var data = await Task.Run(() => GameData.Open(folder, scheme));
-            PlayerWindow window;
-            try
-            {
-                window = new PlayerWindow(data) { Owner = this };
-            }
-            catch
-            {
-                data.Dispose();
-                throw;
-            }
-            window.Show();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Could not open the game for Play Story:\n{ex.Message}", "Play Story",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        finally
-        {
-            TxtStatusArchive.Text = previous;
-            BtnPlayStory.IsEnabled = true;
-        }
-    }
-
-    #endregion
 
     #region Extraction
 
